@@ -11,6 +11,7 @@ import type {
   LevelConfig,
   Rect,
   SaveData,
+  SimulationInput,
 } from '../core/types.ts';
 import { FixedTimestepLoop } from '../platform/debug/fixed-loop.ts';
 import {
@@ -41,6 +42,7 @@ import type {
 import {
   GameRenderer,
   routeCardRect,
+  screenDirectionToWorld,
 } from '../render/index.ts';
 import type { RenderOptions } from '../render/index.ts';
 
@@ -402,7 +404,7 @@ export class GameRuntime {
     let steps = 0;
     if (!flowChanged && this.screenValue === 'game' && this.simulation && !this.paused) {
       this.syncLoopPause();
-      steps = this.loop.advance(frameDelta, this.simulation, () => this.input.sample());
+      steps = this.loop.advance(frameDelta, this.simulation, () => this.sampleSimulationInput());
       this.detectResult();
     }
     this.render();
@@ -780,6 +782,17 @@ export class GameRuntime {
       joystickCenter: { x: -1000, y: -1000 },
       joystickRadius: 1,
       guideButtonRect: { x: -1000, y: -1000, width: 1, height: 1 },
+    };
+  }
+
+  /** 横屏画面将规则层旋转后显示，摇杆得到的屏幕方向需先还原到规则坐标。 */
+  private sampleSimulationInput(): SimulationInput {
+    const input = this.input.sample();
+    const orientation = this.renderer.context.layout.orientation;
+    if (orientation !== 'landscape' || !input.move) return input;
+    return {
+      ...input,
+      move: screenDirectionToWorld(input.move, orientation),
     };
   }
 

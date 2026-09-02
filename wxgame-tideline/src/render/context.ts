@@ -65,7 +65,11 @@ export interface ViewportMetrics {
 
 export interface RenderLayout {
   viewport: ViewportMetrics;
+  /** 当前画布方向；横屏时将规则层坐标逆时针旋转 90° 显示。 */
+  orientation: WorldOrientation;
   worldBounds: Rect;
+  /** 应用显示方向后的世界包围盒，用于计算缩放和居中。 */
+  displayWorldBounds: Rect;
   worldScale: number;
   worldOffset: Vec2;
   hudRect: Rect;
@@ -80,7 +84,46 @@ export interface RenderLayout {
   guideButtonRect: Rect;
 }
 
+export type WorldOrientation = 'portrait' | 'landscape';
+
 export const LOGICAL_VIEWPORT = { width: 360, height: 640 } as const;
+
+function orientationFor(viewport: ViewportMetrics): WorldOrientation {
+  return viewport.contentRect.width >= viewport.contentRect.height ? 'landscape' : 'portrait';
+}
+
+/** 将规则层的竖屏坐标映射为横屏画布坐标：车厢在左、站台在右。 */
+function worldToDisplay(point: Vec2, orientation: WorldOrientation): Vec2 {
+  return orientation === 'landscape'
+    ? { x: point.y, y: -point.x }
+    : { ...point };
+}
+
+function displayToWorld(point: Vec2, orientation: WorldOrientation): Vec2 {
+  return orientation === 'landscape'
+    ? { x: -point.y, y: point.x }
+    : { ...point };
+}
+
+function displayBoundsFor(worldBounds: Rect, orientation: WorldOrientation): Rect {
+  if (orientation === 'portrait') return { ...worldBounds };
+  return {
+    x: worldBounds.y,
+    y: -(worldBounds.x + worldBounds.width),
+    width: worldBounds.height,
+    height: worldBounds.width,
+  };
+}
+
+/** 将规则层方向（例如玩家朝向）转换成屏幕方向，供屏幕空间控件使用。 */
+export function worldDirectionToScreen(direction: Vec2, orientation: WorldOrientation): Vec2 {
+  return worldToDisplay(direction, orientation);
+}
+
+/** 将屏幕方向转换成规则层方向，供摇杆/键盘输入进入模拟前使用。 */
+export function screenDirectionToWorld(direction: Vec2, orientation: WorldOrientation): Vec2 {
+  return displayToWorld(direction, orientation);
+}
 
 export function createViewportMetrics(
   width: number,
@@ -121,13 +164,15 @@ export function createRenderLayout(
   worldBounds: Rect,
 ): RenderLayout {
   const content = viewport.contentRect;
+  const orientation = orientationFor(viewport);
+  const displayWorldBounds = displayBoundsFor(worldBounds, orientation);
   const worldScale = Math.max(
     0.05,
-    Math.min(content.width / Math.max(worldBounds.width, 1), content.height / Math.max(worldBounds.height, 1)),
+    Math.min(content.width / Math.max(displayWorldBounds.width, 1), content.height / Math.max(displayWorldBounds.height, 1)),
   );
   const worldOffset: Vec2 = {
-    x: content.x + (content.width - worldBounds.width * worldScale) / 2 - worldBounds.x * worldScale,
-    y: content.y + (content.height - worldBounds.height * worldScale) / 2 - worldBounds.y * worldScale,
+    x: content.x + (content.width - displayWorldBounds.width * worldScale) / 2 - displayWorldBounds.x * worldScale,
+    y: content.y + (content.height - displayWorldBounds.height * worldScale) / 2 - displayWorldBounds.y * worldScale,
   };
   const hudRect: Rect = {
     x: content.x + 12,
@@ -187,7 +232,9 @@ export function createRenderLayout(
   };
   return {
     viewport,
+    orientation,
     worldBounds: { ...worldBounds },
+    displayWorldBounds,
     worldScale,
     worldOffset,
     hudRect,
@@ -209,12 +256,21 @@ export function createRenderLayout(
 export function routeCardRect(viewport: ViewportMetrics, index: number): Rect {
   const content = viewport.contentRect;
   const safeIndex = Number.isFinite(index) ? Math.max(0, Math.floor(index)) : 0;
-  const cardWidth = Math.min(300, Math.max(0, content.width - 32));
   const cardHeight = 112;
   const gap = 14;
+  const landscape = content.width >= content.height;
+  const columns = landscape
+    ? (content.width >= 560 ? 3 : content.width >= 360 ? 2 : 1)
+    : 1;
+  const cardWidth = landscape
+    ? Math.min(300, Math.max(0, (content.width - 32 - gap * (columns - 1)) / columns))
+    : Math.min(300, Math.max(0, content.width - 32));
+  const row = Math.floor(safeIndex / columns);
+  const column = safeIndex % columns;
+  const totalWidth = cardWidth * columns + gap * (columns - 1);
   return {
-    x: content.x + (content.width - cardWidth) / 2,
-    y: content.y + 122 + safeIndex * (cardHeight + gap),
+    x: content.x + (content.width - totalWidth) / 2 + column * (cardWidth + gap),
+    y: content.y + 122 + row * (cardHeight + gap),
     width: cardWidth,
     height: cardHeight,
   };
@@ -234,17 +290,19 @@ export class RenderContext {
   }
 
   worldToScreen(point: Vec2): Vec2 {
+    const displayPoint = worldToDisplay(point, this.layout.orientation);
     return {
-      x: this.layout.worldOffset.x + point.x * this.layout.worldScale,
-      y: this.layout.worldOffset.y + point.y * this.layout.worldScale,
+      x: this.layout.worldOffset.x + displayPoint.x * this.layout.worldScale,
+      y: this.layout.worldOffset.y + displayPoint.y * this.layout.worldScale,
     };
   }
 
   screenToWorld(point: Vec2): Vec2 {
-    return {
+    const displayPoint = {
       x: (point.x - this.layout.worldOffset.x) / this.layout.worldScale,
       y: (point.y - this.layout.worldOffset.y) / this.layout.worldScale,
     };
+    return displayToWorld(displayPoint, this.layout.orientation);
   }
 
   withWorld(draw: () => void): void {
@@ -252,6 +310,7 @@ export class RenderContext {
     ctx.save();
     ctx.translate(layout.worldOffset.x, layout.worldOffset.y);
     ctx.scale(layout.worldScale, layout.worldScale);
+    if (layout.orientation === 'landscape') ctx.rotate(-Math.PI / 2);
     draw();
     ctx.restore();
   }

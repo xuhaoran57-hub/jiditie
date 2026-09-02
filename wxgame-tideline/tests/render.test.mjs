@@ -11,6 +11,7 @@ import {
   createRenderLayout,
   createViewportMetrics,
   fillRoundRect,
+  routeCardRect,
   renderGameFrame,
   roundRectPath,
 } from '../src/render/index.ts';
@@ -100,6 +101,45 @@ test('viewport layout keeps logical coordinates reversible and configures DPR', 
   assert.equal(canvas.width, 1125);
   assert.equal(canvas.height, 2001);
   assert.deepEqual(canvasContext.operations.at(-1), ['setTransform', 3, 0, 0, 3, 0, 0]);
+});
+
+test('landscape layout rotates the world while keeping geometry reversible', () => {
+  const metrics = createViewportMetrics(667, 375, 1);
+  const layout = createRenderLayout(metrics, { x: 0, y: -160, width: 320, height: 728 });
+  assert.equal(layout.orientation, 'landscape');
+  assert.deepEqual(layout.displayWorldBounds, { x: -160, y: -320, width: 728, height: 320 });
+
+  const context = new RenderContext(new MockContext(), metrics, layout.worldBounds);
+  const trainPoint = context.worldToScreen({ x: 160, y: -80 });
+  const platformPoint = context.worldToScreen({ x: 160, y: 300 });
+  assert.ok(trainPoint.x < platformPoint.x, 'train should appear to the left of the platform');
+
+  const worldPoint = { x: 123.5, y: 42.25 };
+  const roundTrip = context.screenToWorld(context.worldToScreen(worldPoint));
+  assertClose(roundTrip.x, worldPoint.x);
+  assertClose(roundTrip.y, worldPoint.y);
+});
+
+test('landscape route cards use columns so all stations fit the wide screen', () => {
+  const viewport = createViewportMetrics(667, 375);
+  const first = routeCardRect(viewport, 0);
+  const second = routeCardRect(viewport, 1);
+  const third = routeCardRect(viewport, 2);
+  assert.equal(first.y, second.y);
+  assert.equal(second.y, third.y);
+  assert.ok(first.x < second.x && second.x < third.x);
+  assert.ok(third.x + third.width <= viewport.contentRect.x + viewport.contentRect.width);
+});
+
+test('GameRenderer draws the horizontal world and upright actor counter-rotation', () => {
+  const context = new MockContext({ nativeRoundRect: false });
+  const canvas = makeCanvas(context);
+  const level = MVP_LEVELS[0];
+  const renderer = GameRenderer.fromCanvas(canvas, 667, 375, 1, {}, level);
+  renderer.render(new GameSimulation(level, 23).snapshot(), level, { showControls: true });
+  assert.equal(renderer.context.layout.orientation, 'landscape');
+  assert.ok(context.operations.some(([name, angle]) => name === 'rotate' && angle < 0));
+  assert.ok(context.operations.some(([name, angle]) => name === 'rotate' && angle > 0));
 });
 
 test('roundRect uses native API when available and a quadratic fallback otherwise', () => {
@@ -245,7 +285,7 @@ test('M8 visual sample emits depth and character primitives', () => {
 
   const names = context.operations.map(([name]) => name);
   assert.ok(names.filter((name) => name === 'ellipse').length >= 2);
-  assert.ok(names.includes('rotate'));
+  assert.equal(names.includes('rotate'), false);
   assert.ok(names.filter((name) => name === 'roundRect' || name === 'quadraticCurveTo').length >= 8);
   assert.ok(names.filter((name) => name === 'lineTo').length >= 20);
 });

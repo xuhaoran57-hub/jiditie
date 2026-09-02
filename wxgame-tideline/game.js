@@ -44,8 +44,9 @@
     }
     if (!context) return;
     // bridge 未就绪时只使用保守回退尺寸，避免再次触发 getSystemInfo。
-    const width = 375;
-    const height = 667;
+    // 与 game.json 的横屏启动配置保持一致，bridge 尚未就绪时也不先闪出竖屏画布。
+    const width = 667;
+    const height = 375;
     const dpr = 1;
     bootCanvas.width = Math.round(width * dpr);
     bootCanvas.height = Math.round(height * dpr);

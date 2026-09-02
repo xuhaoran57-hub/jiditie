@@ -184,10 +184,9 @@ test('M7 快速启动/停止、前后台暂停和连续切关不产生状态串�
   assert.equal(runtime.retry(), true);
   assert.equal(runtime.state.levelId, 'sea-gate');
   assert.equal(runtime.state.elapsed, 0);
-  const door = runtime.currentLevel.doors[0];
   runtime.state.player.position = {
-    x: door.safeZone.x + door.safeZone.width / 2,
-    y: door.safeZone.y + door.safeZone.height / 2,
+    x: runtime.currentLevel.trainBounds.x + runtime.currentLevel.trainBounds.width / 2,
+    y: runtime.currentLevel.trainBounds.y + runtime.currentLevel.trainBounds.height / 2,
   };
   for (let index = 0; index < 120 && runtime.screen !== 'result'; index += 1) runtime.tick(0.25);
   assert.equal(runtime.screen, 'result');

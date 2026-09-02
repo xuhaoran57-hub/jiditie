@@ -6,6 +6,7 @@ import {
   fillRoundRect,
   RenderContext,
   routeCardRect,
+  worldDirectionToScreen,
   strokeRoundRect,
 } from './context.ts';
 import { canvasFont, canvasMonoFont, TIDELINE_TOKENS } from './design-tokens.ts';
@@ -141,7 +142,8 @@ export function renderControls(renderContext: RenderContext, state: GameState, g
     drawCircleScreen(ctx, joystick, layout.joystickRadius, '#23445f', '#b0d1da', 2);
     ctx.globalAlpha = 0.85;
     const speedRatio = clamp(Math.hypot(state.player.velocity.x, state.player.velocity.y) / Math.max(1, state.player.speed), 0, 1);
-    const knob = { x: joystick.x + state.player.facing.x * layout.joystickRadius * 0.45 * speedRatio, y: joystick.y + state.player.facing.y * layout.joystickRadius * 0.45 * speedRatio };
+    const facing = worldDirectionToScreen(state.player.facing, layout.orientation);
+    const knob = { x: joystick.x + facing.x * layout.joystickRadius * 0.45 * speedRatio, y: joystick.y + facing.y * layout.joystickRadius * 0.45 * speedRatio };
     drawCircleScreen(ctx, knob, layout.joystickRadius * 0.42, UI.accent, '#d8fff6', 2);
     ctx.restore();
 

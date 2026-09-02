@@ -1,5 +1,5 @@
 import type { GameState, LevelConfig, Passenger, PassengerKind, Vec2 } from '../core/types.ts';
-import { normalize, sub } from '../core/vector.ts';
+import { normalize } from '../core/vector.ts';
 import { fillRoundRect, RenderContext, strokeRoundRect } from './context.ts';
 import { TIDELINE_TOKENS } from './design-tokens.ts';
 
@@ -139,7 +139,14 @@ function drawShadow(context: RenderContext, position: Vec2, radius: number, alph
   const { ctx } = context;
   ctx.save();
   ctx.globalAlpha = alpha;
-  drawEllipse(context, shadow, radius * 0.78, radius * 0.28, '#102b3a');
+  if (context.layout.orientation === 'landscape') {
+    // 世界层旋转后，阴影也反向旋回，仍保持屏幕水平方向贴地。
+    ctx.translate(shadow.x, shadow.y);
+    ctx.rotate(Math.PI / 2);
+    drawEllipse(context, { x: 0, y: 0 }, radius * 0.78, radius * 0.28, '#102b3a');
+  } else {
+    drawEllipse(context, shadow, radius * 0.78, radius * 0.28, '#102b3a');
+  }
   ctx.restore();
 }
 
@@ -148,6 +155,8 @@ function drawMiniCompanion(context: RenderContext, palette: CharacterPalette, of
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(offset.x, offset.y);
+  // 世界层横屏时逆时针旋转，角色几何体反向旋回，保证头部始终朝屏幕上方。
+  if (context.layout.orientation === 'landscape') ctx.rotate(Math.PI / 2);
   ctx.scale(0.7, 0.7);
   drawEllipse(context, { x: 0, y: 5 }, 7, 3, '#173348');
   ctx.fillStyle = palette.pants;
@@ -166,7 +175,6 @@ function drawCharacterBody(
   context: RenderContext,
   palette: CharacterPalette,
   radius: number,
-  direction: Vec2,
   walkPhase: number,
   kind: PassengerKind,
   inside = false,
@@ -177,7 +185,8 @@ function drawCharacterBody(
   const oppositeStride = Math.sin(walkPhase + Math.PI) * 1.8;
 
   ctx.save();
-  ctx.rotate(Math.atan2(direction.y, direction.x) + Math.PI / 2);
+  // 角色不跟随横屏世界层旋转，始终保持头朝屏幕上方。
+  if (context.layout.orientation === 'landscape') ctx.rotate(Math.PI / 2);
   ctx.scale(scale, scale);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -289,7 +298,6 @@ function drawCharacterBody(
 function drawPassenger(context: RenderContext, passenger: Passenger, now: number): void {
   const { ctx } = context;
   const palette = PASSENGER_PALETTES[passenger.kind];
-  const direction = normalize(sub(passenger.target, passenger.position), { x: 0, y: 1 });
   const inside = passenger.role === 'inside';
   const boarding = passenger.role === 'boarding';
   const phase = actorSeed(passenger.id) * Math.PI * 2;
@@ -317,7 +325,8 @@ function drawPassenger(context: RenderContext, passenger: Passenger, now: number
   // 乘客虽然在规则层移动，画面里却看起来像没有跟着走。
   ctx.save();
   ctx.translate(passenger.position.x, passenger.position.y);
-  drawCharacterBody(context, palette, passenger.radius, direction, moving ? walkPhase : phase, passenger.kind, inside || boarding);
+  // 角色始终以屏幕上方为头部方向；行走状态只改变步伐，不旋转人物轮廓。
+  drawCharacterBody(context, palette, passenger.radius, moving ? walkPhase : phase, passenger.kind, inside || boarding);
   ctx.restore();
   ctx.globalAlpha = alphaBefore;
 }
@@ -337,7 +346,8 @@ function drawPlayer(context: RenderContext, state: GameState): void {
     ctx.globalAlpha = 1;
   }
   ctx.translate(player.position.x, player.position.y);
-  ctx.rotate(Math.atan2(direction.y, direction.x) + Math.PI / 2);
+  // 玩家角色保持屏幕朝向；移动箭头在世界层中绘制，仍然指向真实行进方向。
+  if (context.layout.orientation === 'landscape') ctx.rotate(Math.PI / 2);
   ctx.scale(Math.max(0.78, Math.min(1.55, player.radius / 10)), Math.max(0.78, Math.min(1.55, player.radius / 10)));
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';

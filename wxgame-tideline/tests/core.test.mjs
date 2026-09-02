@@ -27,7 +27,7 @@ test('相同种子产生完全相同的随机序列', () => {
   assert.deepEqual(createPassengers(MVP_LEVELS[1], new SeededRandom(42)), createPassengers(MVP_LEVELS[1], new SeededRandom(42)));
 });
 
-test('阶段按时推进，并在关门时根据安全区成功或失败', () => {
+test('阶段按时推进，并在关门时根据是否进入车厢成功或失败', () => {
   const machine = new PhaseMachine({
     phaseDurations: { intro: 0.1, arriving: 0.1, positioning: 0.1, exiting: 0.1 },
     boardingDuration: 0.4,
@@ -94,22 +94,70 @@ test('疏导只影响前方目标，并消耗体力和触发冷却', () => {
   assert.equal(blocked.reason, 'cooldown');
 });
 
-test('车门关闭前进入安全区会成功，离开安全区会失败', () => {
+test('只有真正进入车厢内部才会成功，站在门外安全区会失败', () => {
   const success = new GameSimulation('sea-gate', 11);
   const successState = success.getState();
-  const door = success.level.doors[0];
   successState.player.position = {
-    x: door.safeZone.x + door.safeZone.width / 2,
-    y: door.safeZone.y + door.safeZone.height / 2,
+    x: success.level.trainBounds.x + success.level.trainBounds.width / 2,
+    y: success.level.trainBounds.y + success.level.trainBounds.height / 2,
   };
   success.runUntilResult(30);
   assert.equal(successState.outcome, 'success');
 
   const failure = new GameSimulation('sea-gate', 11);
   const failureState = failure.getState();
-  failureState.player.position = { x: 20, y: 520 };
+  const door = failure.level.doors[0];
+  failureState.player.position = {
+    x: door.safeZone.x + door.safeZone.width / 2,
+    y: door.safeZone.y + door.safeZone.height / 2,
+  };
   failure.runUntilResult(30);
   assert.equal(failureState.outcome, 'failure');
+});
+
+test('玩家只能从打开的选中车门进入车厢内部', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 0;
+  level.passenger.alightingCount = 0;
+  const simulation = new GameSimulation(level, 12);
+  const state = simulation.getState();
+  const door = level.doors[0];
+
+  // 车门关闭时，向上移动只能停在站台侧。
+  state.player.position = { x: door.center.x, y: door.safeZone.y + 4 };
+  simulation.movePlayer({ x: 0, y: -1 }, 1);
+  assert.ok(state.player.position.y >= level.platformBounds.y + state.player.radius);
+  assert.equal(state.player.inCarriage, false);
+
+  while (simulation.phase !== 'exiting') simulation.step(0.1, { move: { x: 0, y: 0 } });
+  for (let index = 0; index < 30 && !state.player.inCarriage; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: -1 } });
+  }
+  assert.equal(state.doors[0].open, true);
+  assert.equal(state.player.inCarriage, true);
+  assert.ok(state.player.position.y <= level.trainBounds.y + level.trainBounds.height - state.player.radius);
+});
+
+test('下车乘客在车门打开前留在车厢内部，开门后才走出', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 1;
+  level.passenger.alightingCount = 1;
+  const simulation = new GameSimulation(level, 13);
+  const state = simulation.getState();
+  const passenger = state.passengers[0];
+  assert.ok(passenger);
+  assert.equal(passenger.role, 'alighting');
+  assert.ok(passenger.position.y < level.trainBounds.y + level.trainBounds.height);
+
+  simulation.step(0.1);
+  assert.equal(passenger.role, 'alighting');
+  assert.ok(passenger.position.y < level.trainBounds.y + level.trainBounds.height);
+
+  while (simulation.phase !== 'exiting') simulation.step(0.1);
+  assert.equal(state.doors[0].open, true);
+  const beforeExit = passenger.position.y;
+  simulation.step(1 / 30);
+  assert.ok(passenger.position.y > beforeExit);
 });
 
 test('容量达到上限时，后续乘客不能继续无条件进入', () => {
@@ -122,11 +170,11 @@ test('容量达到上限时，后续乘客不能继续无条件进入', () => {
   const door = level.doors[0];
   passengers.forEach((passenger) => {
     passenger.role = 'waiting';
-    passenger.position = { x: door.center.x, y: 10 };
+    passenger.position = { x: door.center.x, y: 24 };
     passenger.target = { x: door.center.x, y: 24 };
   });
   const doorStates = [{ id: door.id, occupancy: 0, open: true, blocked: false }];
-  const result = updatePassengers(passengers, {
+  const context = {
     dt: 1 / 30,
     now: 2,
     platformBounds: level.platformBounds,
@@ -136,11 +184,16 @@ test('容量达到上限时，后续乘客不能继续无条件进入', () => {
     carriageCapacity: level.carriageCapacity,
     boardingOpen: true,
     alightingOpen: true,
-  });
-  assert.equal(result.boarded, 1);
+  };
+  const result = updatePassengers(passengers, context);
+  assert.equal(result.boarded, 0, '预留车位不等于已经走进车厢');
   assert.equal(doorStates[0].occupancy, 1);
   assert.ok(result.blockedAttempts >= 1);
   assert.equal(passengers.filter((passenger) => passenger.role === 'waiting').length, 2);
+  let completedBoarding = 0;
+  for (let index = 0; index < 60; index += 1) completedBoarding += updatePassengers(passengers, context).boarded;
+  assert.equal(completedBoarding, 1);
+  assert.equal(passengers.filter((passenger) => passenger.role === 'inside').length, 1);
 });
 
 test('上车角色能穿过门槛并落在车厢内', () => {
@@ -158,12 +211,18 @@ test('上车角色能穿过门槛并落在车厢内', () => {
   const passenger = state.passengers[0];
   assert.ok(door && passenger);
   state.player.position = { x: door.center.x, y: door.safeZone.y + 8 };
-  passenger.position = { x: door.center.x, y: door.entryZone.y + door.entryZone.height / 2 };
+  passenger.position = { x: door.center.x, y: door.safeZone.y + 24 };
   passenger.target = { x: door.center.x, y: door.safeZone.y + 24 };
 
   simulation.step(1 / 30, { move: { x: 0, y: 0 } });
+  assert.equal(passenger.role, 'waiting');
+  assert.ok(passenger.position.y > 0, '候车区内不能直接传送到车厢');
+
+  for (let index = 0; index < 30 && passenger.role === 'waiting'; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: 0 } });
+  }
   assert.equal(passenger.role, 'boarding');
-  assert.ok(passenger.position.y < 0, 'boarding passenger should cross the platform edge');
+  assert.ok(passenger.position.y > 0, '开始上车时仍应位于门前，随后再穿过门槛');
 
   for (let index = 0; index < 60 && passenger.role !== 'inside'; index += 1) {
     simulation.step(1 / 30, { move: { x: 0, y: 0 } });
@@ -191,6 +250,11 @@ test('门前上车通道不会被站在安全区的玩家堵住', () => {
 
   simulation.step(1 / 30, { move: { x: 0, y: 0 } });
   assert.equal(state.player.inSafeZone, true);
+  assert.equal(passenger.role, 'waiting');
+  assert.ok(passenger.position.y > 24, '进入候车区后仍应先走向门前航点');
+  for (let index = 0; index < 30 && passenger.role === 'waiting'; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: 0 } });
+  }
   assert.equal(passenger.role, 'boarding');
   assert.ok(passenger.target.y < level.trainBounds.y + 120);
 });

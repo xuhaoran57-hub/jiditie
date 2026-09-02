@@ -15,7 +15,7 @@ function door(
     label,
     center: { x, y: 0 },
     width,
-    // 安全区在门的站台一侧；中心点进入该矩形即可完成结算判定。
+    // 安全区仅用于站台侧提示和门前疏导；结算判定使用车厢内部位置。
     safeZone: { x: x - width / 2 - 12, y: 12, width: width + 24, height: 52 },
     entryZone: { x: x - width / 2, y: -18, width, height: 52 },
     recommended,

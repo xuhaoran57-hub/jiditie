@@ -27,11 +27,13 @@ import {
   vec,
 } from './vector.ts';
 
-// 上车是一个短暂的过渡状态，速度略高于站台排队速度，避免整段关门倒计时
-// 都消耗在“走到门口”上；数值不影响容量和安全区判定。
+// 上车路线包含“走到门口”和“穿过门洞”两个连续阶段，适度加速避免整段
+// 关门倒计时都消耗在接近门口上；数值不改变容量规则。
 const BOARDING_SPEED_MULTIPLIER = 1.8;
 const TRAIN_INTERIOR_TOP_OFFSET = 108;
 const TRAIN_INTERIOR_ROW_GAP = 16;
+const TRAIN_ALIGHTING_TOP_PADDING = 24;
+const TRAIN_ALIGHTING_DOOR_PADDING = 26;
 
 /** 均匀网格，用于碰撞 broad-phase；规则层不依赖渲染坐标系。 */
 export class SpatialHash<T extends { position: Vec2 }> {
@@ -238,12 +240,12 @@ export function createPassengers(level: LevelConfig, random: RandomSource): Pass
     const position = isAlighting
       ? spawnWithoutOverlap(
           train,
-          level.passenger.spawnPadding / 2,
+          Math.max(level.passenger.spawnPadding / 2, style.radius + 6),
           random,
           occupied,
           style.radius * 2.1,
-          train.y + style.radius,
-          train.y + train.height - style.radius,
+          train.y + TRAIN_ALIGHTING_TOP_PADDING + style.radius,
+          train.y + train.height - TRAIN_ALIGHTING_DOOR_PADDING,
         )
       : spawnWithoutOverlap(
           platform,
@@ -257,7 +259,7 @@ export function createPassengers(level: LevelConfig, random: RandomSource): Pass
     occupied.push(position);
     const groupId = kind === 'group' ? `group-${Math.floor(index / 2)}` : undefined;
     const target = isAlighting
-      ? { x: selectedDoor.center.x, y: platform.y + 26 }
+      ? { x: selectedDoor.center.x, y: train.y + TRAIN_ALIGHTING_DOOR_PADDING }
       : { x: selectedDoor.center.x, y: platform.y + 26 };
     passengers.push({
       id: `passenger-${String(index + 1).padStart(3, '0')}`,
@@ -342,18 +344,13 @@ function enterTrainPoint(train: Rect, door: DoorConfig, index: number): Vec2 {
   return clampPointToRect({ x, y }, train, 14);
 }
 
-function isDoorApproach(position: Vec2, radius: number, door: DoorConfig): boolean {
-  // 将站台安全区向门口延伸一小段，避免玩家站在安全区时把排队角色
-  // 推回去；真正的容量、开门和阻塞判定仍在 updatePassengers 中执行。
-  const padding = Math.max(8, radius * 1.5);
-  const left = door.center.x - door.width / 2 - padding;
-  const right = door.center.x + door.width / 2 + padding;
-  const top = Math.min(door.entryZone.y, door.safeZone.y);
-  const bottom = Math.max(
-    door.entryZone.y + door.entryZone.height,
-    door.safeZone.y + door.safeZone.height + padding,
-  );
-  return position.x >= left && position.x <= right && position.y >= top && position.y <= bottom;
+function hasReachedBoardingPoint(passenger: Passenger, door: DoorConfig): boolean {
+  // 候车区只是排队/疏导区域；必须走到门前航点，才允许切换成 boarding。
+  // 切换时保留当前位置，后续再连续穿过门洞，避免瞬移到车内。
+  const tolerance = Math.max(3, passenger.radius * 0.55);
+  const halfWidth = Math.max(0, door.width / 2 - passenger.radius * 0.4);
+  return Math.abs(passenger.position.x - door.center.x) <= halfWidth
+    && distance(passenger.position, passenger.target) <= tolerance;
 }
 
 /** 更新非玩家人群，并处理下车航点、上车容量和角色状态。 */
@@ -390,7 +387,10 @@ export function updatePassengers(
     if (!door) continue;
 
     if (passenger.role === 'alighting') {
-      if (!context.alightingOpen) {
+      const doorState = doorStateById(context.doorStates, door.id);
+      // 下车流只能在车门真正打开后开始；在进站、停靠和关门前的阶段，
+      // 乘客保持在车厢内部，避免一开局就出现在站台等候区。
+      if (!context.alightingOpen || !doorState?.open) {
         passenger.velocity = vec();
         continue;
       }
@@ -434,24 +434,19 @@ export function updatePassengers(
         x: clamp(door.center.x, walkableBounds.x + passenger.radius, walkableBounds.x + walkableBounds.width - passenger.radius),
         y: walkableBounds.y + 24,
       };
-      const insideEntry = isDoorApproach(passenger.position, passenger.radius, door);
+      const atBoardingPoint = hasReachedBoardingPoint(passenger, door);
       const state = doorStateById(context.doorStates, door.id);
       const totalOccupancy = context.doorStates.reduce((sum, item) => sum + item.occupancy, 0);
-      if (insideEntry && state && state.open && !state.blocked && totalOccupancy < context.carriageCapacity) {
+      if (atBoardingPoint && state && state.open && !state.blocked && totalOccupancy < context.carriageCapacity) {
         passenger.role = 'boarding';
         passenger.doorId = door.id;
-        // 预约成功即跨过门槛内沿，随后再沿车内航点移动；这样“上车”不会
-        // 视觉上停留在站台等候区，也不会被门槛碰撞卡住。
-        passenger.position = {
-          x: door.center.x,
-          y: Math.min(passenger.position.y, door.center.y - Math.max(2, passenger.radius * 0.45)),
-        };
+        // 只预留车位，不改写当前位置；下一帧从门前航点继续走入车厢。
         passenger.target = enterTrainPoint(context.trainBounds, door, state.occupancy);
         state.occupancy += 1; // 先预留座位，避免同一帧多个角色超卖容量。
-        boarded += 1;
       } else {
-        if (insideEntry && context.boardingOpen) blockedAttempts += 1;
-        advancePassenger(passenger, passenger.target, passenger.speed * dt, dt);
+        if (atBoardingPoint && context.boardingOpen) blockedAttempts += 1;
+        // 接近门前航点也使用短暂加速，给角色留出完整的“走到门口→穿过门洞→进车厢”时间。
+        advancePassenger(passenger, passenger.target, passenger.speed * BOARDING_SPEED_MULTIPLIER * dt, dt);
         passenger.position = clampPointToRect(passenger.position, walkableBounds, passenger.radius);
         passenger.position = keepOutsideRects(passenger.position, passenger.radius, blockedZones);
       }
@@ -474,6 +469,7 @@ export function updatePassengers(
       if (distance(passenger.position, passenger.target) <= 0.001) {
         passenger.role = 'inside';
         passenger.velocity = vec();
+        boarded += 1;
       }
     }
   }

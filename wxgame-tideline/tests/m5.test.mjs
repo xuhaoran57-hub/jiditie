@@ -173,10 +173,9 @@ test('M5 结算会保存最高分并解锁下一站，重试/下一站/返回路
   const wx = createMockWx();
   const runtime = new GameRuntime(wx, { seed: 11 });
   runtime.selectLevel('sea-gate');
-  const door = runtime.currentLevel.doors[0];
   runtime.state.player.position = {
-    x: door.safeZone.x + door.safeZone.width / 2,
-    y: door.safeZone.y + door.safeZone.height / 2,
+    x: runtime.currentLevel.trainBounds.x + runtime.currentLevel.trainBounds.width / 2,
+    y: runtime.currentLevel.trainBounds.y + runtime.currentLevel.trainBounds.height / 2,
   };
   runUntilResult(runtime);
   assert.equal(runtime.screen, 'result');
@@ -189,11 +188,10 @@ test('M5 结算会保存最高分并解锁下一站，重试/下一站/返回路
   runtime.input.handleTouchStart({ changedTouches: [{ identifier: 3, x: retryRect.x + 4, y: retryRect.y + 4 }] });
   runtime.tick(0);
   assert.equal(runtime.screen, 'game');
-  // 再次让玩家进入安全区，验证下一站按钮前置条件仍由结算结果决定。
-  const retryDoor = runtime.currentLevel.doors[0];
+  // 再次让玩家进入车厢，验证下一站按钮前置条件仍由结算结果决定。
   runtime.state.player.position = {
-    x: retryDoor.safeZone.x + retryDoor.safeZone.width / 2,
-    y: retryDoor.safeZone.y + retryDoor.safeZone.height / 2,
+    x: runtime.currentLevel.trainBounds.x + runtime.currentLevel.trainBounds.width / 2,
+    y: runtime.currentLevel.trainBounds.y + runtime.currentLevel.trainBounds.height / 2,
   };
   runUntilResult(runtime);
   assert.equal(runtime.state.outcome, 'success');

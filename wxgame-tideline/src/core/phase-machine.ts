@@ -33,7 +33,7 @@ function safeDuration(value: number): number {
 
 /**
  * 负责“进站 → 下车 → 上车 → 关门 → 结算”的纯时间状态机。
- * 它不读取玩家对象，只在关门时询问调用方是否处于安全区，因此可以单独
+ * 它不读取玩家对象，只在关门时询问调用方是否已进入车厢，因此可以单独
  * 在回放、服务器验证或单元测试中运行。
  */
 export class PhaseMachine {
@@ -105,7 +105,7 @@ export class PhaseMachine {
    * 推进 dt 秒。一次较大的 dt 也会按边界依次走完多个阶段，避免快进时跳过
    * warning 或 result。返回值记录本次发生的阶段切换，便于事件日志和测试。
    */
-  update(dt: number, playerInSafeZone: boolean): PhaseTransition[] {
+  update(dt: number, playerInCarriage: boolean): PhaseTransition[] {
     if (this.isTerminal || !Number.isFinite(dt) || dt <= 0) return [];
 
     let remaining = dt;
@@ -136,7 +136,7 @@ export class PhaseMachine {
 
         if (this._doorRemaining <= EPSILON) {
           this._doorRemaining = 0;
-          this.finish(playerInSafeZone, transitions, elapsedInUpdate);
+          this.finish(playerInCarriage, transitions, elapsedInUpdate);
         }
         continue;
       }
@@ -165,7 +165,7 @@ export class PhaseMachine {
     // dt 可能恰好落在边界上，此处补一次零剩余的边界检查，保证例如
     // boardingDuration=0 时不会卡在 boarding。
     if (!this.isTerminal && (this._phase === 'boarding' || this._phase === 'warning')) {
-      if (this._doorRemaining <= EPSILON) this.finish(playerInSafeZone, transitions, elapsedInUpdate);
+      if (this._doorRemaining <= EPSILON) this.finish(playerInCarriage, transitions, elapsedInUpdate);
       else if (
         this._phase === 'boarding' &&
         this._doorRemaining <= this.config.warningThreshold + EPSILON
@@ -177,8 +177,8 @@ export class PhaseMachine {
     return transitions;
   }
 
-  tick(dt: number, playerInSafeZone: boolean): PhaseTransition[] {
-    return this.update(dt, playerInSafeZone);
+  tick(dt: number, playerInCarriage: boolean): PhaseTransition[] {
+    return this.update(dt, playerInCarriage);
   }
 
   getState(): PhaseMachineSnapshot {
@@ -211,7 +211,7 @@ export class PhaseMachine {
   }
 
   private finish(
-    playerInSafeZone: boolean,
+    playerInCarriage: boolean,
     transitions: PhaseTransition[],
     elapsedInUpdate: number,
   ): void {
@@ -220,7 +220,7 @@ export class PhaseMachine {
     this._phase = 'result';
     this._phaseElapsed = 0;
     this._doorRemaining = 0;
-    this._outcome = playerInSafeZone ? 'success' : 'failure';
+    this._outcome = playerInCarriage ? 'success' : 'failure';
     transitions.push({ from: previous, to: 'result', elapsedInUpdate });
   }
 }

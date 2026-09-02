@@ -181,6 +181,9 @@ export interface PlayerState {
   maxStamina: number;
   abilityCooldown: number;
   selectedDoorId: string;
+  /** 玩家圆心已经完全越过门槛并进入车厢内部。 */
+  inCarriage: boolean;
+  /** 玩家当前位于所选车门外侧的候车安全区。 */
   inSafeZone: boolean;
   guideUses: number;
 }
@@ -288,6 +291,7 @@ export interface PassengerUpdateContext {
 }
 
 export interface PassengerUpdateResult {
+  /** 本帧真正走到车厢内目标点并完成上车的乘客数。 */
   boarded: number;
   alightingExited: number;
   collisionCount: number;

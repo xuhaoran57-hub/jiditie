@@ -96,8 +96,30 @@ function boardingBounds(level: LevelConfig): Rect {
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+function isInsideRectWithRadius(position: Vec2, bounds: Rect, radius: number): boolean {
+  const safeRadius = Math.max(0, Number.isFinite(radius) ? radius : 0);
+  return position.x >= bounds.x + safeRadius
+    && position.x <= bounds.x + bounds.width - safeRadius
+    && position.y >= bounds.y + safeRadius
+    && position.y <= bounds.y + bounds.height - safeRadius;
+}
+
+function isInDoorPassage(position: Vec2, door: DoorConfig, radius: number): boolean {
+  const safeRadius = Math.max(0, Number.isFinite(radius) ? radius : 0);
+  const halfWidth = Math.max(0, door.width / 2 - safeRadius * 0.65);
+  const top = Math.min(door.entryZone.y, door.safeZone.y) - safeRadius;
+  const bottom = Math.max(
+    door.entryZone.y + door.entryZone.height,
+    door.safeZone.y + door.safeZone.height,
+  ) + safeRadius;
+  return position.x >= door.center.x - halfWidth
+    && position.x <= door.center.x + halfWidth
+    && position.y >= top
+    && position.y <= bottom;
+}
+
 function clampPassenger(passenger: Passenger, level: LevelConfig): void {
-  // boarding 是穿过门槛的过渡状态，必须允许坐标跨过 y=0；旧逻辑先把它
+  // boarding/alighting 是穿过门槛的过渡状态，必须允许坐标跨过 y=0；旧逻辑先把它
   // 夹进 trainBounds，随后又夹回 platformBounds，结果角色永远卡在门口。
   passenger.position = clampPointToRect(passenger.position, boardingBounds(level), passenger.radius);
   if (passenger.role === 'waiting') {
@@ -136,8 +158,8 @@ function makeCollisionActors(state: GameState, level: LevelConfig): { actors: Co
       movable: true,
     },
   ];
-  // 已经预留车位并穿过门槛的角色进入单向 boarding 通道，不再和站在
-  // 安全区的玩家互相推挤；否则玩家为了完成安全区判定会把乘客堵在门口。
+  // 已经到达门前并预留车位的角色进入单向 boarding 通道，不再和站在
+  // 安全区的玩家互相推挤；否则玩家为了完成进车判定会把乘客堵在门口。
   const passengers = activePassengers(state.passengers);
   const collisionPassengers = passengers.filter((passenger) =>
     passenger.role !== 'boarding' && !isDoorApproach(passenger, level, state.doors),
@@ -192,40 +214,35 @@ export class GameSimulation {
       this.state.events.push({ type: 'door-select', at: this.state.elapsed, detail: doorId });
     }
     this.state.player.selectedDoorId = doorId;
-    this.updateSafeZone();
+    this.updatePlayerZones();
     return true;
   }
 
   movePlayer(direction: Vec2, dt: number): void {
     if (this.state.phase === 'result') return;
-    const walkableBounds = this.walkableBounds();
-    const blockedZones = this.blockedZones();
     const safeDt = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const input = finiteVec(direction, vec());
     const normalized = normalize(input, vec());
     if (Math.abs(input.x) < 1e-8 && Math.abs(input.y) < 1e-8) {
       this.state.player.velocity = vec();
-      this.state.player.position = keepOutsideRects(
-        clampPointToRect(this.state.player.position, walkableBounds, this.state.player.radius),
-        this.state.player.radius,
-        blockedZones,
+      this.state.player.position = this.constrainPlayerPosition(
+        this.state.player.position,
+        this.state.player.position,
       );
-      this.updateSafeZone();
+      this.updatePlayerZones();
       return;
     }
     this.state.player.facing = normalized;
     this.state.player.velocity = scale(normalized, this.state.player.speed);
-    this.state.player.position = clampPointToRect(
-      add(this.state.player.position, scale(this.state.player.velocity, safeDt)),
-      walkableBounds,
-      this.state.player.radius,
-    );
+    const previous = copyVec(this.state.player.position);
+    const candidate = add(previous, scale(this.state.player.velocity, safeDt));
+    this.state.player.position = this.constrainPlayerPosition(candidate, previous);
     this.state.player.position = keepOutsideRects(
       this.state.player.position,
       this.state.player.radius,
-      blockedZones,
+      this.blockedZones(),
     );
-    this.updateSafeZone();
+    this.updatePlayerZones();
   }
 
   useGuide(): GuideResult {
@@ -255,10 +272,10 @@ export class GameSimulation {
         this.state.player.maxStamina,
       );
 
+      this.syncDoorStates();
       if (PLAYABLE_PHASES.has(phaseBefore)) this.movePlayer(input.move ?? vec(), quantum);
       else this.state.player.velocity = vec();
-      this.updateSafeZone();
-      this.syncDoorStates();
+      this.updatePlayerZones();
 
       const crowdResult = updatePassengers(this.state.passengers, {
         dt: quantum,
@@ -281,18 +298,18 @@ export class GameSimulation {
       if (crowdResult.alightingExited > 0) this.state.events.push({ type: 'alighting-clear', at: this.state.elapsed });
 
       this.resolveFrameCollisions();
-      this.updateSafeZone();
+      this.updatePlayerZones();
 
       const doorBefore = this.state.doorRemaining;
-      if (this.state.player.inSafeZone && (phaseBefore === 'boarding' || phaseBefore === 'warning')) {
-        // 记录玩家最早进入安全区时还剩多少时间，供效率分使用；不要等到
+      if (this.state.player.inCarriage && (phaseBefore === 'boarding' || phaseBefore === 'warning')) {
+        // 记录玩家最早进入车厢时还剩多少时间，供效率分使用；不要等到
         // machine 把倒计时归零后才记录，否则所有成功局都会得到同一分数。
         this.state.metrics.doorRemainingAtFinish = Math.max(
           this.state.metrics.doorRemainingAtFinish,
           doorBefore,
         );
       }
-      const transitions = this.machine.update(quantum, this.state.player.inSafeZone);
+      const transitions = this.machine.update(quantum, this.state.player.inCarriage);
       const resultTransition = transitions.find((transition) => transition.to === 'result');
       const consumed = resultTransition
         ? Math.max(0, Math.min(quantum, resultTransition.elapsedInUpdate))
@@ -488,6 +505,7 @@ export class GameSimulation {
         maxStamina: this.level.player.maxStamina,
         abilityCooldown: 0,
         selectedDoorId,
+        inCarriage: false,
         inSafeZone: false,
         guideUses: 0,
       },
@@ -514,7 +532,11 @@ export class GameSimulation {
   }
 
   private syncDoorStates(): void {
-    const open = this.state.phase === 'boarding' || this.state.phase === 'warning';
+    // 下车阶段也必须显示并使用真实的开门状态；下车流只有在这里打开后
+    // 才能从车厢内部穿过门洞到站台。
+    const open = this.state.phase === 'exiting'
+      || this.state.phase === 'boarding'
+      || this.state.phase === 'warning';
     const occupied = this.state.doors.reduce((sum, door) => sum + door.occupancy, 0);
     const eventBlockedDoor = this.state.activeEvent?.kind === 'door-change'
       ? this.state.activeEvent.fromDoorId
@@ -525,9 +547,14 @@ export class GameSimulation {
     }
   }
 
-  private updateSafeZone(): void {
+  private updatePlayerZones(): void {
     const door = findDoor(this.level, this.state.player.selectedDoorId);
     const doorState = this.state.doors.find((item) => item.id === this.state.player.selectedDoorId);
+    this.state.player.inCarriage = isInsideRectWithRadius(
+      this.state.player.position,
+      this.level.trainBounds,
+      this.state.player.radius,
+    );
     this.state.player.inSafeZone = Boolean(
       door &&
         !doorState?.blocked &&
@@ -548,12 +575,12 @@ export class GameSimulation {
 
     const playerActor = actors.find((actor) => actor.id === 'player');
     if (playerActor) {
+      this.state.player.position = this.constrainPlayerPosition(
+        finiteVec(playerActor.position, this.state.player.position),
+        this.state.player.position,
+      );
       this.state.player.position = keepOutsideRects(
-        clampPointToRect(
-          finiteVec(playerActor.position, this.state.player.position),
-          this.walkableBounds(),
-          this.state.player.radius,
-        ),
+        this.state.player.position,
         this.state.player.radius,
         this.blockedZones(),
       );
@@ -565,16 +592,81 @@ export class GameSimulation {
       passenger.position = finiteVec(actor.position, passenger.position);
       passenger.velocity = finiteVec(actor.velocity, vec());
       clampPassenger(passenger, this.level);
-      if (passenger.role === 'waiting' || passenger.role === 'alighting') {
+      if (passenger.role === 'waiting' || (passenger.role === 'alighting' && passenger.routeProgress >= 1)) {
         passenger.position = clampPointToRect(passenger.position, this.walkableBounds(), passenger.radius);
         passenger.position = keepOutsideRects(passenger.position, passenger.radius, this.blockedZones());
-      } else if (passenger.role === 'boarding') {
+      } else if (passenger.role === 'alighting' || passenger.role === 'boarding') {
         // 上车中的角色可以暂时位于门槛两侧；只有进入车厢后才锁定到
-        // trainBounds，避免碰撞收尾把它拉回站台等候区。
+        // trainBounds，避免碰撞收尾把它拉回站台等候区。下车中的角色
+        // 在 routeProgress=0 时也必须留在车内，等待开门后再跨过门槛。
         passenger.position = clampPointToRect(passenger.position, boardingBounds(this.level), passenger.radius);
         passenger.position = keepOutsideRects(passenger.position, passenger.radius, this.blockedZones());
       }
     }
+  }
+
+  /**
+   * 限制玩家只能在站台和车厢两个连续空间内移动，并且只有从打开的
+   * 选中车门穿过门洞才能跨越 y=0。这样车厢内部不再是一个仅供渲染的
+   * 背景矩形，玩家位置也可以直接用于上车结算。
+   */
+  private constrainPlayerPosition(candidate: Vec2, previous: Vec2): Vec2 {
+    const radius = this.state.player.radius;
+    const train = this.level.trainBounds;
+    const platform = this.walkableBounds();
+    const union = boardingBounds(this.level);
+    const next = finiteVec(candidate, previous);
+    const prior = finiteVec(previous, this.state.player.position);
+    const nextInside = isInsideRectWithRadius(next, train, radius);
+    const priorInside = isInsideRectWithRadius(prior, train, radius);
+    const canTraverse = this.canTraverseSelectedDoor(prior, next);
+
+    if (nextInside) {
+      if (priorInside || canTraverse) return clampPointToRect(next, train, radius);
+      return clampPointToRect(next, platform, radius);
+    }
+
+    // 保留门洞中间的过渡位置，避免从站台侧一步被夹回去，导致看起来
+    // 永远只能站在安全区而无法真正走进车厢。
+    if (canTraverse) {
+      return clampPointToRect(next, union, radius);
+    }
+
+    if (priorInside) {
+      return clampPointToRect(prior, train, radius);
+    }
+
+    return clampPointToRect(next, platform, radius);
+  }
+
+  private canTraverseSelectedDoor(previous: Vec2, next: Vec2): boolean {
+    const door = findDoor(this.level, this.state.player.selectedDoorId);
+    const state = this.state.doors.find((item) => item.id === this.state.player.selectedDoorId);
+    if (!door || !state?.open || state.blocked) return false;
+
+    // 固定步长通常不会一次跨很远，但手动调试/恢复可能传入大 dt；
+    // 检查穿越门线时的插值 x，避免角色从门侧“穿墙”。
+    const boundary = door.center.y;
+    const crossedDoorLine = previous.y !== next.y
+      && (previous.y - boundary) * (next.y - boundary) <= 0;
+    if (crossedDoorLine) {
+      const ratio = (boundary - previous.y) / (next.y - previous.y);
+      const crossing = {
+        x: previous.x + (next.x - previous.x) * ratio,
+        y: boundary,
+      };
+      return isInDoorPassage(crossing, door, this.state.player.radius);
+    }
+
+    // 已经位于门洞过渡区时，允许继续向车内/站台移动；但不能把“某一端
+    // 碰到门洞”当成整条路径都合法，避免大步长从门侧斜穿车厢边界。
+    const previousInPassage = isInDoorPassage(previous, door, this.state.player.radius);
+    const nextInPassage = isInDoorPassage(next, door, this.state.player.radius);
+    const previousInside = isInsideRectWithRadius(previous, this.level.trainBounds, this.state.player.radius);
+    const nextInside = isInsideRectWithRadius(next, this.level.trainBounds, this.state.player.radius);
+    return (previousInside && nextInPassage)
+      || (nextInside && previousInPassage)
+      || (previousInPassage && nextInPassage);
   }
 }
 
