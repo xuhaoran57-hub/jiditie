@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  潮汐线 M6 自有矢量资源。所有图形为抽象几何形状，不引用现实线路、标识
+  或第三方角色；Canvas 当前仍保留无图片时的几何回退。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320">
+  <title>潮汐线原创角色与界面图标精灵</title>
+  <desc>用于微信小游戏的虚构湾城线路视觉资产，采用潮汐青、暖沙金和深海蓝。</desc>
+  <defs>
+    <style>
+      .ink { fill: #0c1220; }
+      .outline { stroke: #15263c; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+      .player { fill: #f6f8ff; }
+      .accent { fill: #42d6c5; }
+      .regular { fill: #a9c4da; }
+      .fast { fill: #f3a65a; }
+      .slow { fill: #b7a6e6; }
+      .luggage { fill: #d6bd7b; }
+      .phone { fill: #7bc7d5; }
+      .group { fill: #e58eb6; }
+      .gold { fill: #f5cb66; }
+      .muted { fill: #9fb2ca; }
+    </style>
+    <symbol id="player" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="22" class="player outline"/>
+      <path d="M32 7v18M32 7l-7 9M32 7l7 9" fill="none" stroke="#42d6c5" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="32" cy="32" r="28" fill="none" stroke="#67e0be" stroke-width="3" stroke-dasharray="5 7" opacity=".8"/>
+    </symbol>
+    <symbol id="passenger-regular" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="18" class="regular outline"/>
+      <path d="M32 13v10M32 41v10" stroke="#eef7ff" stroke-width="3" stroke-linecap="round" opacity=".8"/>
+    </symbol>
+    <symbol id="passenger-fast" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="17" class="fast outline"/>
+      <path d="M8 25h18M2 35h20M39 24l13-7M39 40l13 7" fill="none" stroke="#fff1d1" stroke-width="4" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="passenger-slow" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="19" class="slow outline"/>
+      <path d="M21 32h22M32 21v22" stroke="#f4edff" stroke-width="3" stroke-linecap="round" opacity=".9"/>
+    </symbol>
+    <symbol id="passenger-luggage" viewBox="0 0 76 64">
+      <circle cx="27" cy="32" r="18" class="luggage outline"/>
+      <rect x="43" y="20" width="22" height="25" rx="4" fill="#8b6a3f" class="outline"/>
+      <path d="M49 20v-6h10v6" fill="none" stroke="#f1d49a" stroke-width="3" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="passenger-phone" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="17" class="phone outline"/>
+      <rect x="28" y="18" width="9" height="17" rx="2" fill="#22354d"/>
+      <circle cx="32.5" cy="39" r="1.7" fill="#eef7ff"/>
+    </symbol>
+    <symbol id="passenger-group" viewBox="0 0 76 64">
+      <circle cx="26" cy="32" r="15" class="group outline"/>
+      <circle cx="49" cy="32" r="15" class="group outline" opacity=".8"/>
+      <path d="M15 51c7 5 17 5 24 0M38 51c7 5 17 5 24 0" fill="none" stroke="#ffe6f1" stroke-width="3" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="station-badge" viewBox="0 0 96 64">
+      <rect x="4" y="8" width="88" height="48" rx="16" fill="#172238" stroke="#42d6c5" stroke-width="4"/>
+      <path d="M18 36c10-18 20 18 30 0s20 18 30 0" fill="none" stroke="#f5cb66" stroke-width="5" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="icon-guide" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="28" fill="#285d68" stroke="#42d6c5" stroke-width="4"/>
+      <path d="M17 32h30M32 17l15 15-15 15" fill="none" stroke="#eef7ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-pause" viewBox="0 0 64 48">
+      <rect x="3" y="3" width="58" height="42" rx="10" fill="#22314d" stroke="#9fb2ca" stroke-width="2"/>
+      <path d="M24 14v20M40 14v20" stroke="#eef7ff" stroke-width="6" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="icon-route" viewBox="0 0 64 64">
+      <path d="M17 12v27c0 8 8 13 15 13h15M45 52l-8-8M45 52l-8 8" fill="none" stroke="#42d6c5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="17" cy="12" r="6" class="gold"/>
+      <circle cx="47" cy="52" r="6" class="gold"/>
+    </symbol>
+    <symbol id="icon-retry" viewBox="0 0 64 64">
+      <path d="M50 26a20 20 0 1 0 2 15" fill="none" stroke="#42d6c5" stroke-width="5" stroke-linecap="round"/>
+      <path d="M50 12v14H36" fill="none" stroke="#eef7ff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+
+  <!-- Preview sheet for art review; runtime may reference the symbols above. -->
+  <g transform="translate(16 16)"><use href="#station-badge" width="96" height="64"/></g>
+  <g transform="translate(132 16)"><use href="#player" width="64" height="64"/></g>
+  <g transform="translate(220 16)"><use href="#passenger-regular" width="64" height="64"/></g>
+  <g transform="translate(300 16)"><use href="#passenger-fast" width="64" height="64"/></g>
+  <g transform="translate(380 16)"><use href="#passenger-slow" width="64" height="64"/></g>
+  <g transform="translate(16 112)"><use href="#passenger-luggage" width="76" height="64"/></g>
+  <g transform="translate(124 112)"><use href="#passenger-phone" width="64" height="64"/></g>
+  <g transform="translate(204 112)"><use href="#passenger-group" width="76" height="64"/></g>
+  <g transform="translate(312 112)"><use href="#icon-guide" width="64" height="64"/></g>
+  <g transform="translate(396 120)"><use href="#icon-pause" width="64" height="48"/></g>
+  <g transform="translate(84 220)"><use href="#icon-route" width="64" height="64"/></g>
+  <g transform="translate(196 220)"><use href="#icon-retry" width="64" height="64"/></g>
+</svg>

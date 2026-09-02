@@ -1,0 +1,18 @@
+{
+  "description": "潮汐线：赶上这班车——湾城虚构线路微信小游戏",
+  "packOptions": {
+    "ignore": []
+  },
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "compileHotReLoad": false
+  },
+  "compileType": "game",
+  "appid": "touristappid",
+  "projectname": "wxgame-tideline",
+  "condition": {}
+}

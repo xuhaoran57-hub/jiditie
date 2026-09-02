@@ -1,0 +1,19 @@
+node_modules/
+dist/
+miniprogram_npm/
+.wx/
+.DS_Store
+Thumbs.db
+*.log
+coverage/
+*.tsbuildinfo
+
+# 本地离线安装缓存（不参与版本控制）
+.npm-cache/
+
+# 微信开发者工具本地配置
+project.private.config.json
+
+# 本地生成的临时资源和截图
+tmp/
+screenshots/
