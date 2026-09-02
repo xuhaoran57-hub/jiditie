@@ -9,7 +9,7 @@ const entrySource = readFileSync(resolve('game.js'), 'utf8');
 function createContext() {
   const timers = [];
   const ticks = [];
-  const calls = { runtime: 0, systemInfo: 0, canvas: 0 };
+  const calls = { runtime: 0, systemInfo: 0, canvas: 0, resize: 0 };
   const context2d = {
     setTransform() {},
     fillRect() {},
@@ -44,7 +44,7 @@ function createContext() {
         createWxGameRuntime() {
           calls.runtime += 1;
           if (calls.runtime === 1) throw new Error('jsbridge not ready');
-          return {};
+          return { resize() { calls.resize += 1; } };
         },
       };
     },
@@ -80,4 +80,5 @@ test('入口等待 JSBridge 后重试，启动阶段不读取系统信息', () =
   assert.equal(harness.calls.runtime, 2);
   assert.equal(harness.calls.systemInfo, 0);
   assert.equal(harness.calls.canvas, 0);
+  assert.equal(harness.calls.resize, 1);
 });

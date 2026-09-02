@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { GameSimulation, MVP_LEVELS } from '../src/core/index.ts';
 import { DebugInputController, FixedTimestepLoop } from '../src/platform/debug/index.ts';
@@ -26,8 +27,9 @@ class MockContext {
   lineCap = 'butt';
   lineJoin = 'miter';
 
-  constructor({ nativeRoundRect = true } = {}) {
+  constructor({ nativeRoundRect = true, throwingRoundRect = false } = {}) {
     if (!nativeRoundRect) this.roundRect = undefined;
+    if (throwingRoundRect) this.roundRect = () => { throw new Error('roundRect unavailable'); };
   }
 
   record(name, ...args) {
@@ -112,6 +114,19 @@ test('roundRect uses native API when available and a quadratic fallback otherwis
   assert.ok(fallback.operations.some(([name]) => name === 'closePath'));
 });
 
+test('roundRect falls back when a partially exposed native method throws', () => {
+  const context = new MockContext({ throwingRoundRect: true });
+  fillRoundRect(context, 4, 6, 30, 20, 8, '#fff');
+  assert.ok(context.operations.some(([name]) => name === 'quadraticCurveTo'));
+  assert.ok(context.operations.some(([name]) => name === 'fill'));
+
+  const canvas = makeCanvas(context);
+  const renderer = GameRenderer.fromCanvas(canvas, 375, 667, 1, {}, MVP_LEVELS[0]);
+  const state = new GameSimulation(MVP_LEVELS[0], 7).snapshot();
+  renderer.render(state, MVP_LEVELS[0], { screen: 'route', levels: MVP_LEVELS });
+  assert.ok(context.operations.some(([name, text]) => name === 'fillText' && text === '1. 海风门'));
+});
+
 test('GameRenderer renders game, warning, pause, result and route screens on a mock canvas', () => {
   const context = new MockContext({ nativeRoundRect: false });
   const canvas = makeCanvas(context);
@@ -145,9 +160,15 @@ test('GameRenderer renders game, warning, pause, result and route screens on a m
     unlockedLevelIds: ['sea-gate', 'cloud-harbor'],
     selectedLevelIndex: 1,
   });
+  renderer.render(state, level, {
+    screen: 'route',
+    levels: [],
+    unlockedLevelIds: ['sea-gate'],
+  });
 
   const names = context.operations.map(([name]) => name);
   assert.ok(names.includes('fillRect'));
+  assert.ok(names.includes('strokeRect'));
   assert.ok(names.includes('arc'));
   assert.ok(names.includes('fillText'));
   assert.ok(names.includes('quadraticCurveTo'));
@@ -208,4 +229,51 @@ test('fixed timestep loop clamps long frames and pauses deterministically', () =
   loop.reset();
   assert.equal(loop.totalSteps, 0);
   assert.equal(loop.paused, false);
+});
+
+test('M8 visual sample emits depth and character primitives', () => {
+  const context = new MockContext({ nativeRoundRect: false });
+  const canvas = makeCanvas(context);
+  const level = MVP_LEVELS[1];
+  const simulation = new GameSimulation(level, 31415);
+  const state = simulation.getState();
+  state.elapsed = 1.35;
+  state.phase = 'boarding';
+
+  const renderer = GameRenderer.fromCanvas(canvas, 375, 667, 1, {}, level);
+  renderer.render(state, level, { showControls: false });
+
+  const names = context.operations.map(([name]) => name);
+  assert.ok(names.filter((name) => name === 'ellipse').length >= 2);
+  assert.ok(names.includes('rotate'));
+  assert.ok(names.filter((name) => name === 'roundRect' || name === 'quadraticCurveTo').length >= 8);
+  assert.ok(names.filter((name) => name === 'lineTo').length >= 20);
+});
+
+test('passenger body is translated to its world position', () => {
+  const context = new MockContext({ nativeRoundRect: false });
+  const canvas = makeCanvas(context);
+  const level = MVP_LEVELS[0];
+  const simulation = new GameSimulation(level, 2718);
+  const state = simulation.getState();
+  const target = state.passengers[0];
+  assert.ok(target);
+  const position = { x: 211.25, y: 301.75 };
+  target.position = position;
+  target.role = 'waiting';
+  target.kind = 'regular';
+  for (const passenger of state.passengers.slice(1)) passenger.role = 'exited';
+
+  const renderer = GameRenderer.fromCanvas(canvas, 375, 667, 1, {}, level);
+  renderer.render(state, level, { showControls: false });
+
+  assert.ok(context.operations.some(([name, x, y]) =>
+    name === 'translate' && x === position.x && y === position.y,
+  ));
+});
+
+test('passenger rendering has no continuous target-direction overlay', () => {
+  const source = readFileSync(new URL('../src/render/actor-renderer.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /drawDirectionHint|drawSpeedTrails/);
+  assert.doesNotMatch(source, /distance\(passenger\.position, passenger\.target\)/);
 });

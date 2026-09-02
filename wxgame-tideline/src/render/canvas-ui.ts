@@ -27,7 +27,7 @@ const PHASE_LABELS: Record<GameState['phase'], string> = {
   arriving: '列车进站',
   positioning: '观察人流',
   exiting: '先下后上',
-  boarding: '寻找入口',
+  boarding: '乘客进入车厢',
   warning: '即将关门',
   result: '本局结算',
 };
@@ -38,12 +38,33 @@ function drawBar(
   ratio: number,
   color: string,
 ): void {
-  fillRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, rect.height / 2, '#0e1728');
+  fillRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, rect.height / 2, '#17324a');
   fillRoundRect(ctx, rect.x, rect.y, rect.width * clamp(ratio, 0, 1), rect.height, rect.height / 2, color);
 }
 
 function formatSeconds(seconds: number): string {
   return `${Math.max(0, seconds).toFixed(1)}s`;
+}
+
+/** 兼容不接受 maxWidth 参数的旧版小游戏 Canvas。 */
+function fillTextCompat(
+  ctx: Canvas2DContextLike,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth?: number,
+): void {
+  try {
+    if (maxWidth === undefined) ctx.fillText(text, x, y);
+    else ctx.fillText(text, x, y, maxWidth);
+  } catch {
+    if (maxWidth === undefined) return;
+    try {
+      ctx.fillText(text, x, y);
+    } catch {
+      // 文本属于非阻断性视觉反馈，单个字段失败不应中断整帧。
+    }
+  }
 }
 
 function medalColor(medal: ScoreResult['medal']): string {
@@ -98,7 +119,7 @@ export function renderHud(renderContext: RenderContext, level: LevelConfig, stat
     if (state.activeEvent) {
       const bannerWidth = Math.max(52, Math.min(190, rect.width - pause.width - 18));
       const banner = { x: rect.x, y: pause.y, width: bannerWidth, height: pause.height };
-      fillRoundRect(ctx, banner.x, banner.y, banner.width, banner.height, 9, '#28425b');
+      fillRoundRect(ctx, banner.x, banner.y, banner.width, banner.height, 9, '#35647d');
       strokeRoundRect(ctx, banner.x, banner.y, banner.width, banner.height, 9, UI.gold, 1);
       drawCenteredText(
         ctx,
@@ -117,7 +138,7 @@ export function renderControls(renderContext: RenderContext, state: GameState, g
     const joystick = layout.joystickCenter;
     ctx.save();
     ctx.globalAlpha = 0.5;
-    drawCircleScreen(ctx, joystick, layout.joystickRadius, '#18263e', '#8ba2bb', 2);
+    drawCircleScreen(ctx, joystick, layout.joystickRadius, '#23445f', '#b0d1da', 2);
     ctx.globalAlpha = 0.85;
     const speedRatio = clamp(Math.hypot(state.player.velocity.x, state.player.velocity.y) / Math.max(1, state.player.speed), 0, 1);
     const knob = { x: joystick.x + state.player.facing.x * layout.joystickRadius * 0.45 * speedRatio, y: joystick.y + state.player.facing.y * layout.joystickRadius * 0.45 * speedRatio };
@@ -126,7 +147,7 @@ export function renderControls(renderContext: RenderContext, state: GameState, g
 
     const button = layout.guideButtonRect;
     const available = state.player.abilityCooldown <= 0 && state.player.stamina >= guideCost;
-    fillRoundRect(ctx, button.x, button.y, button.width, button.height, button.width * 0.28, available ? '#285d68' : '#29354a');
+    fillRoundRect(ctx, button.x, button.y, button.width, button.height, button.width * 0.28, available ? '#2f7880' : '#3d5367');
     strokeRoundRect(ctx, button.x, button.y, button.width, button.height, button.width * 0.28, available ? UI.accent : UI.muted, 2);
     drawCenteredText(ctx, '疏导', { x: button.x + button.width / 2, y: button.y + button.height * 0.42 }, canvasFont(700, 15), UI.text);
     ctx.font = canvasMonoFont(400, 11);
@@ -161,7 +182,7 @@ export function renderResultScreen(renderContext: RenderContext, level: LevelCon
   const score = state.score;
   renderContext.withScreen(() => {
     ctx.globalAlpha = 0.76;
-    ctx.fillStyle = '#080e1a';
+    ctx.fillStyle = '#10243a';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
     ctx.globalAlpha = 1;
     const rect = layout.resultRect;
@@ -213,7 +234,7 @@ export function renderPauseOverlay(renderContext: RenderContext): void {
   const { ctx, layout } = renderContext;
   renderContext.withScreen(() => {
     ctx.globalAlpha = 0.7;
-    ctx.fillStyle = '#080e1a';
+    ctx.fillStyle = '#10243a';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
     ctx.globalAlpha = 1;
     drawCenteredText(ctx, '已暂停', { x: layout.viewport.width / 2, y: layout.viewport.height / 2 - 14 }, canvasFont(700, 24), UI.text);
@@ -230,7 +251,7 @@ export function renderRoutePage(
   const { ctx, layout } = renderContext;
   renderContext.withScreen(() => {
     const content = layout.viewport.contentRect;
-    ctx.fillStyle = '#0c1220';
+    ctx.fillStyle = '#0b1627';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
     drawCenteredText(ctx, '潮汐线', { x: content.x + content.width / 2, y: content.y + 52 }, canvasFont(700, 28), UI.text);
     drawCenteredText(ctx, '选择一站，练习更体面的通行', { x: content.x + content.width / 2, y: content.y + 82 }, canvasFont(400, 13), UI.muted);
@@ -239,7 +260,22 @@ export function renderRoutePage(
       const y = card.y;
       const unlocked = unlockedLevelIds.includes(level.id);
       const selected = index === selectedIndex;
+      // 先画一层基础矩形。部分微信 Canvas 实现对圆角路径支持不完整，
+      // 但 fillRect/strokeRect 是稳定能力；基础层可保证卡片和命中区域始终可见。
+      try {
+        ctx.fillStyle = unlocked ? UI.panel : '#151d2d';
+        ctx.fillRect(card.x, y, card.width, card.height);
+      } catch {
+        // 圆角/矩形均属于视觉增强；文字和后续卡片仍应继续绘制。
+      }
       fillRoundRect(ctx, card.x, y, card.width, card.height, 18, unlocked ? UI.panel : '#151d2d');
+      try {
+        ctx.strokeStyle = selected ? UI.accent : '#30415c';
+        ctx.lineWidth = selected ? 2 : 1;
+        ctx.strokeRect(card.x, y, card.width, card.height);
+      } catch {
+        // 由 strokeRoundRect 的兼容路径继续尝试边框绘制。
+      }
       strokeRoundRect(ctx, card.x, y, card.width, card.height, 18, selected ? UI.accent : '#30415c', selected ? 2 : 1);
       ctx.font = canvasFont(700, 17);
       ctx.fillStyle = unlocked ? UI.text : UI.muted;
@@ -248,7 +284,7 @@ export function renderRoutePage(
       ctx.fillText(`${index + 1}. ${level.name}`, card.x + 18, y + 17);
       ctx.font = canvasFont(400, 12);
       ctx.fillStyle = UI.muted;
-      ctx.fillText(unlocked ? level.description : '完成上一站后解锁', card.x + 18, y + 48, card.width - 36);
+      fillTextCompat(ctx, unlocked ? level.description : '完成上一站后解锁', card.x + 18, y + 48, card.width - 36);
       ctx.textAlign = 'right';
       ctx.fillStyle = unlocked ? UI.accent : UI.muted;
       ctx.fillText(unlocked ? '可出发' : '锁定', card.x + card.width - 18, y + 86);

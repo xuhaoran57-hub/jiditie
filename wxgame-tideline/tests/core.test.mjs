@@ -143,6 +143,58 @@ test('容量达到上限时，后续乘客不能继续无条件进入', () => {
   assert.equal(passengers.filter((passenger) => passenger.role === 'waiting').length, 2);
 });
 
+test('上车角色能穿过门槛并落在车厢内', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 1;
+  level.passenger.alightingCount = 0;
+  const simulation = new GameSimulation(level, 17);
+  for (let index = 0; index < 80 && simulation.phase !== 'boarding'; index += 1) {
+    simulation.step(0.1, { move: { x: 0, y: 0 } });
+  }
+  assert.equal(simulation.phase, 'boarding');
+
+  const state = simulation.getState();
+  const door = level.doors[0];
+  const passenger = state.passengers[0];
+  assert.ok(door && passenger);
+  state.player.position = { x: door.center.x, y: door.safeZone.y + 8 };
+  passenger.position = { x: door.center.x, y: door.entryZone.y + door.entryZone.height / 2 };
+  passenger.target = { x: door.center.x, y: door.safeZone.y + 24 };
+
+  simulation.step(1 / 30, { move: { x: 0, y: 0 } });
+  assert.equal(passenger.role, 'boarding');
+  assert.ok(passenger.position.y < 0, 'boarding passenger should cross the platform edge');
+
+  for (let index = 0; index < 60 && passenger.role !== 'inside'; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: 0 } });
+  }
+  assert.equal(passenger.role, 'inside');
+  assert.ok(passenger.position.y < 0);
+});
+
+test('门前上车通道不会被站在安全区的玩家堵住', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 1;
+  level.passenger.alightingCount = 0;
+  const simulation = new GameSimulation(level, 23);
+  for (let index = 0; index < 80 && simulation.phase !== 'boarding'; index += 1) {
+    simulation.step(0.1, { move: { x: 0, y: 0 } });
+  }
+  const state = simulation.getState();
+  const door = level.doors[0];
+  const passenger = state.passengers[0];
+  assert.ok(door && passenger);
+  state.player.position = { x: door.center.x, y: door.safeZone.y + door.safeZone.height / 2 };
+  state.player.inSafeZone = false;
+  passenger.position = { x: door.center.x, y: door.safeZone.y + door.safeZone.height + 2 };
+  passenger.target = { x: door.center.x, y: door.safeZone.y + 24 };
+
+  simulation.step(1 / 30, { move: { x: 0, y: 0 } });
+  assert.equal(state.player.inSafeZone, true);
+  assert.equal(passenger.role, 'boarding');
+  assert.ok(passenger.target.y < level.trainBounds.y + 120);
+});
+
 test('损坏或未来版本存档安全回退，正常存档可往返', () => {
   const fallback = emptySave();
   assert.deepEqual(parseSave('{not-json'), fallback);

@@ -63,11 +63,23 @@ test('微信 Canvas 适配器读取窗口/安全区并同步 DPR，异常时使�
   const fallbackCanvas = makeCanvas();
   const fallback = new WxCanvasAdapter({
     createCanvas: () => fallbackCanvas,
-    getWindowInfo: () => { throw new Error('unsupported'); },
+    getWindowInfo: undefined,
     getSystemInfoSync: () => ({ windowWidth: 320, windowHeight: 568, pixelRatio: 1 }),
   });
   assert.equal(fallback.viewport.width, 320);
   assert.equal(fallback.viewport.height, 568);
+  let bridgeFallbackCalls = 0;
+  const bridgeFallback = new WxCanvasAdapter({
+    createCanvas: () => makeCanvas(),
+    getWindowInfo: () => { throw new Error('jsbridge not ready'); },
+    getSystemInfoSync: () => {
+      bridgeFallbackCalls += 1;
+      return { windowWidth: 320, windowHeight: 568, pixelRatio: 1 };
+    },
+  });
+  assert.equal(bridgeFallback.viewport.width, 375);
+  assert.equal(bridgeFallback.viewport.height, 667);
+  assert.equal(bridgeFallbackCalls, 0);
   assert.throws(
     () => new WxCanvasAdapter({ createCanvas: () => ({ width: 0, height: 0 }) }),
     /2d canvas context/,

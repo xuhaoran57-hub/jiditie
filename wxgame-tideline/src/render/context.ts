@@ -262,7 +262,7 @@ export class RenderContext {
     this.ctx.restore();
   }
 
-  clear(color = '#0c1220'): void {
+  clear(color = '#0b1627'): void {
     const { viewport } = this.layout;
     const { ctx } = this;
     ctx.clearRect(0, 0, viewport.width, viewport.height);
@@ -280,11 +280,18 @@ export function roundRectPath(
   radius: number,
 ): void {
   const safeRadius = Math.max(0, Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2));
-  if (ctx.roundRect) {
-    ctx.roundRect(x, y, width, height, safeRadius);
-    return;
+  // 部分微信开发者工具/基础库会暴露 roundRect，但调用时仍抛出
+  // “not supported/illegal invocation”。先尝试原生实现，失败后重新开路
+  // 径并走兼容路径，避免路线页在第一张卡片处中断整帧绘制。
+  if (typeof ctx.roundRect === 'function') {
+    try {
+      ctx.roundRect(x, y, width, height, safeRadius);
+      return;
+    } catch {
+      ctx.beginPath();
+    }
   }
-  if (!ctx.quadraticCurveTo || safeRadius <= 0) {
+  if (typeof ctx.quadraticCurveTo !== 'function' || safeRadius <= 0) {
     ctx.rect(x, y, width, height);
     return;
   }
@@ -310,11 +317,19 @@ export function fillRoundRect(
   color: string,
 ): void {
   ctx.save();
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  roundRectPath(ctx, x, y, width, height, radius);
-  ctx.fill();
-  ctx.restore();
+  try {
+    ctx.fillStyle = color;
+    try {
+      ctx.beginPath();
+      roundRectPath(ctx, x, y, width, height, radius);
+      ctx.fill();
+    } catch {
+      // 低版本 Canvas 可能缺少路径填充；矩形仍应保持可见和可交互。
+      ctx.fillRect(x, y, width, height);
+    }
+  } finally {
+    ctx.restore();
+  }
 }
 
 export function strokeRoundRect(
@@ -328,12 +343,19 @@ export function strokeRoundRect(
   lineWidth = 1,
 ): void {
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
-  ctx.beginPath();
-  roundRectPath(ctx, x, y, width, height, radius);
-  ctx.stroke();
-  ctx.restore();
+  try {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    try {
+      ctx.beginPath();
+      roundRectPath(ctx, x, y, width, height, radius);
+      ctx.stroke();
+    } catch {
+      ctx.strokeRect(x, y, width, height);
+    }
+  } finally {
+    ctx.restore();
+  }
 }
 
 export function drawCenteredText(

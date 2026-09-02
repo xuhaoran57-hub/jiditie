@@ -81,7 +81,19 @@
   function startRuntime() {
     try {
       // 生产入口不把运行时挂到全局对象，避免留下可被外部脚本调用的调试接口。
-      runtimeModule.createWxGameRuntime(wx, { autoStart: true });
+      const runtime = runtimeModule.createWxGameRuntime(wx, { autoStart: true });
+      // 个别 DevTools 版本会在首帧后才把小游戏 Canvas 的显示尺寸同步好。
+      // bridge 稳定后再刷新一次 viewport，确保路线卡片不会被默认 300×150
+      // 画布裁掉；失败时保留已经成功绘制的首帧，不再反复制造错误。
+      if (runtime && typeof runtime.resize === 'function') {
+        scheduleBoot(() => {
+          try {
+            runtime.resize();
+          } catch (_error) {
+            // 尺寸刷新属于增强兼容，不应让已启动的游戏退回错误页。
+          }
+        });
+      }
     } catch (_error) {
       if (bootAttempts < BOOT_RETRY_LIMIT) {
         bootAttempts += 1;

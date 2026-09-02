@@ -37,6 +37,12 @@ wxgame-tideline/
 3. 首次运行先在工程目录执行 `npm install`，再执行 `npm run build:wxgame` 生成 `dist/`；随后用微信开发者工具打开本目录即可运行 `game.js`。
 4. `game.js` 会等待一轮 JSBridge 事件循环后创建 `GameRuntime`；若 bridge 暂时未就绪会有限重试。启动画面不会同步读取系统信息，构建缺失时会显示离线提示而不会发起网络请求。
 
+### 开发者工具告警与空白路线页
+
+- `SharedArrayBuffer will require cross-origin isolation` 是开发者工具内置 Chromium 的弃用提示，不是小游戏业务异常；本工程未使用 `SharedArrayBuffer`，可忽略或升级开发者工具。
+- `[jsbridge] ... jsbridge not ready` 可能出现在首帧初始化时。入口已延迟创建运行时并在 bridge 稳定后刷新 Canvas 尺寸；建议在“详情 → 本地设置”选择稳定基础库后重新编译。
+- 若路线页只看到标题，先在本目录重新执行 `npm run build:wxgame`，然后在开发者工具点击“编译/清缓存并重新编译”。路线卡片对旧版 Canvas 圆角/路径 API 已提供矩形降级，不需要改动业务关卡数据。
+
 ## 独立创作与权利边界
 
 - 线路、城市、站名、角色、对白、UI、字体、音效和图标均按虚构世界重新设计。

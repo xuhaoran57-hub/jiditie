@@ -78,10 +78,13 @@ export class GameRenderer {
   render(state: GameState, level: LevelConfig, options: RenderOptions = {}): void {
     const screen = options.screen ?? (state.phase === 'result' ? 'result' : 'game');
     if (screen === 'route') {
-      this.context.clear('#0c1220');
+      this.context.clear('#0b1627');
+      // 外部调用方可能暂时传入空路线（例如存档/热更新切换的瞬间）。
+      // 至少保留当前关卡，避免页面只剩标题而没有可点击内容。
+      const routeLevels = options.levels && options.levels.length > 0 ? options.levels : [level];
       renderRoutePage(
         this.context,
-        options.levels ?? [level],
+        routeLevels,
         options.unlockedLevelIds ?? [level.id],
         options.selectedLevelIndex ?? 0,
       );
@@ -97,7 +100,7 @@ export class GameRenderer {
     ) {
       this.context.resize(this.context.layout.viewport, expectedWorld);
     }
-    this.context.clear('#0c1220');
+    this.context.clear('#0b1627');
     renderStation(this.context, level, state);
     renderActors(this.context, state, level);
     renderEffects(this.context, level, state);

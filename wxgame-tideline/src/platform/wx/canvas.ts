@@ -53,6 +53,7 @@ function positiveFinite(value: unknown): boolean {
 }
 
 function readInfo(api: WxCanvasApi): WxWindowInfoLike {
+  const hasWindowInfo = typeof api.getWindowInfo === 'function';
   let primary: WxWindowInfoLike | undefined;
   try {
     primary = api.getWindowInfo?.();
@@ -61,7 +62,10 @@ function readInfo(api: WxCanvasApi): WxWindowInfoLike {
   }
 
   let fallback: WxWindowInfoLike | undefined;
-  if (!primary || !positiveFinite(primary.windowWidth) || !positiveFinite(primary.windowHeight)) {
+  // 只在新 API 不存在时调用旧的 getSystemInfoSync。若 getWindowInfo
+  // 因 JSBridge 尚未就绪而失败，继续调用旧 API 只会重复触发同一告警；
+  // 先使用固定回退尺寸，入口稍后会再次 refresh。
+  if (!hasWindowInfo && (!primary || !positiveFinite(primary.windowWidth) || !positiveFinite(primary.windowHeight))) {
     try {
       fallback = api.getSystemInfoSync?.();
     } catch {

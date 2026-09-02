@@ -82,23 +82,50 @@ function findDoor(level: LevelConfig, id: string): DoorConfig | undefined {
   return level.doors.find((door) => door.id === id);
 }
 
+function boardingBounds(level: LevelConfig): Rect {
+  const left = Math.min(level.platformBounds.x, level.trainBounds.x);
+  const top = Math.min(level.platformBounds.y, level.trainBounds.y);
+  const right = Math.max(
+    level.platformBounds.x + level.platformBounds.width,
+    level.trainBounds.x + level.trainBounds.width,
+  );
+  const bottom = Math.max(
+    level.platformBounds.y + level.platformBounds.height,
+    level.trainBounds.y + level.trainBounds.height,
+  );
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 function clampPassenger(passenger: Passenger, level: LevelConfig): void {
-  const minX = level.platformBounds.x + passenger.radius;
-  const maxX = level.platformBounds.x + level.platformBounds.width - passenger.radius;
-  const minY = level.trainBounds.y + passenger.radius;
-  const maxY = level.platformBounds.y + level.platformBounds.height - passenger.radius;
-  passenger.position = {
-    x: clamp(passenger.position.x, minX, maxX),
-    y: clamp(passenger.position.y, minY, maxY),
-  };
+  // boarding 是穿过门槛的过渡状态，必须允许坐标跨过 y=0；旧逻辑先把它
+  // 夹进 trainBounds，随后又夹回 platformBounds，结果角色永远卡在门口。
+  passenger.position = clampPointToRect(passenger.position, boardingBounds(level), passenger.radius);
   if (passenger.role === 'waiting') {
     passenger.position = clampPointToRect(passenger.position, level.platformBounds, passenger.radius);
-  } else if (passenger.role === 'boarding' || passenger.role === 'inside') {
+  } else if (passenger.role === 'inside') {
     passenger.position = clampPointToRect(passenger.position, level.trainBounds, passenger.radius);
   }
 }
 
-function makeCollisionActors(state: GameState): { actors: CollisionActor[]; passengers: Passenger[] } {
+function isDoorApproach(passenger: Passenger, level: LevelConfig, states: DoorState[]): boolean {
+  if (passenger.role !== 'waiting') return false;
+  const door = findDoor(level, passenger.desiredDoorId) ?? level.doors[0];
+  if (!door) return false;
+  const runtime = states.find((state) => state.id === door.id);
+  if (!runtime?.open || runtime.blocked) return false;
+  const padding = Math.max(8, passenger.radius * 1.5);
+  const left = door.center.x - door.width / 2 - padding;
+  const right = door.center.x + door.width / 2 + padding;
+  const top = Math.min(door.entryZone.y, door.safeZone.y);
+  const bottom = Math.max(
+    door.entryZone.y + door.entryZone.height,
+    door.safeZone.y + door.safeZone.height + padding,
+  );
+  return passenger.position.x >= left && passenger.position.x <= right
+    && passenger.position.y >= top && passenger.position.y <= bottom;
+}
+
+function makeCollisionActors(state: GameState, level: LevelConfig): { actors: CollisionActor[]; passengers: Passenger[] } {
   const actors: CollisionActor[] = [
     {
       id: 'player',
@@ -109,8 +136,13 @@ function makeCollisionActors(state: GameState): { actors: CollisionActor[]; pass
       movable: true,
     },
   ];
+  // 已经预留车位并穿过门槛的角色进入单向 boarding 通道，不再和站在
+  // 安全区的玩家互相推挤；否则玩家为了完成安全区判定会把乘客堵在门口。
   const passengers = activePassengers(state.passengers);
-  for (const passenger of passengers) {
+  const collisionPassengers = passengers.filter((passenger) =>
+    passenger.role !== 'boarding' && !isDoorApproach(passenger, level, state.doors),
+  );
+  for (const passenger of collisionPassengers) {
     actors.push({
       id: passenger.id,
       position: copyVec(passenger.position),
@@ -178,6 +210,7 @@ export class GameSimulation {
         this.state.player.radius,
         blockedZones,
       );
+      this.updateSafeZone();
       return;
     }
     this.state.player.facing = normalized;
@@ -506,7 +539,7 @@ export class GameSimulation {
   }
 
   private resolveFrameCollisions(): void {
-    const { actors, passengers } = makeCollisionActors(this.state);
+    const { actors, passengers } = makeCollisionActors(this.state, this.level);
     const collisionCount = resolveCollisions(actors, 3, 36);
     this.state.metrics.collisions += collisionCount;
     if (collisionCount > 0) {
@@ -532,8 +565,13 @@ export class GameSimulation {
       passenger.position = finiteVec(actor.position, passenger.position);
       passenger.velocity = finiteVec(actor.velocity, vec());
       clampPassenger(passenger, this.level);
-      if (passenger.role !== 'inside' && passenger.role !== 'exited') {
+      if (passenger.role === 'waiting' || passenger.role === 'alighting') {
         passenger.position = clampPointToRect(passenger.position, this.walkableBounds(), passenger.radius);
+        passenger.position = keepOutsideRects(passenger.position, passenger.radius, this.blockedZones());
+      } else if (passenger.role === 'boarding') {
+        // 上车中的角色可以暂时位于门槛两侧；只有进入车厢后才锁定到
+        // trainBounds，避免碰撞收尾把它拉回站台等候区。
+        passenger.position = clampPointToRect(passenger.position, boardingBounds(this.level), passenger.radius);
         passenger.position = keepOutsideRects(passenger.position, passenger.radius, this.blockedZones());
       }
     }

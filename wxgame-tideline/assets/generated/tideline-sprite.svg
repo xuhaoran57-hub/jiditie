@@ -8,18 +8,18 @@
   <desc>用于微信小游戏的虚构湾城线路视觉资产，采用潮汐青、暖沙金和深海蓝。</desc>
   <defs>
     <style>
-      .ink { fill: #0c1220; }
+      .ink { fill: #0b1627; }
       .outline { stroke: #15263c; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
       .player { fill: #f6f8ff; }
-      .accent { fill: #42d6c5; }
-      .regular { fill: #a9c4da; }
-      .fast { fill: #f3a65a; }
-      .slow { fill: #b7a6e6; }
-      .luggage { fill: #d6bd7b; }
-      .phone { fill: #7bc7d5; }
-      .group { fill: #e58eb6; }
-      .gold { fill: #f5cb66; }
-      .muted { fill: #9fb2ca; }
+      .accent { fill: #63ead4; }
+      .regular { fill: #b8ddec; }
+      .fast { fill: #ffb36b; }
+      .slow { fill: #c7b9ee; }
+      .luggage { fill: #e8ca82; }
+      .phone { fill: #82dce7; }
+      .group { fill: #ee9fc5; }
+      .gold { fill: #ffd36a; }
+      .muted { fill: #d0e2eb; }
     </style>
     <symbol id="player" viewBox="0 0 64 64">
       <circle cx="32" cy="32" r="22" class="player outline"/>
@@ -28,15 +28,15 @@
     </symbol>
     <symbol id="passenger-regular" viewBox="0 0 64 64">
       <circle cx="32" cy="32" r="18" class="regular outline"/>
-      <path d="M32 13v10M32 41v10" stroke="#eef7ff" stroke-width="3" stroke-linecap="round" opacity=".8"/>
+      <path d="M24 29h16M27 37h10" stroke="#f4fff8" stroke-width="3" stroke-linecap="round" opacity=".85"/>
     </symbol>
     <symbol id="passenger-fast" viewBox="0 0 64 64">
       <circle cx="32" cy="32" r="17" class="fast outline"/>
-      <path d="M8 25h18M2 35h20M39 24l13-7M39 40l13 7" fill="none" stroke="#fff1d1" stroke-width="4" stroke-linecap="round"/>
+      <path d="M25 23h14M22 40h20" fill="none" stroke="#fff1d1" stroke-width="4" stroke-linecap="round"/>
     </symbol>
     <symbol id="passenger-slow" viewBox="0 0 64 64">
       <circle cx="32" cy="32" r="19" class="slow outline"/>
-      <path d="M21 32h22M32 21v22" stroke="#f4edff" stroke-width="3" stroke-linecap="round" opacity=".9"/>
+      <path d="M39 36l8 14" fill="none" stroke="#f4edff" stroke-width="3" stroke-linecap="round" opacity=".9"/>
     </symbol>
     <symbol id="passenger-luggage" viewBox="0 0 76 64">
       <circle cx="27" cy="32" r="18" class="luggage outline"/>

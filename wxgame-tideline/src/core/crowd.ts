@@ -27,6 +27,12 @@ import {
   vec,
 } from './vector.ts';
 
+// 上车是一个短暂的过渡状态，速度略高于站台排队速度，避免整段关门倒计时
+// 都消耗在“走到门口”上；数值不影响容量和安全区判定。
+const BOARDING_SPEED_MULTIPLIER = 1.8;
+const TRAIN_INTERIOR_TOP_OFFSET = 108;
+const TRAIN_INTERIOR_ROW_GAP = 16;
+
 /** 均匀网格，用于碰撞 broad-phase；规则层不依赖渲染坐标系。 */
 export class SpatialHash<T extends { position: Vec2 }> {
   private readonly cellSize: number;
@@ -326,11 +332,28 @@ export function keepOutsideRects(position: Vec2, radius: number, zones: readonly
   return next;
 }
 
-function enterTrainPoint(train: Rect, index: number): Vec2 {
-  const columns = Math.max(1, Math.floor(train.width / 48));
-  const x = clamp(train.x + 24 + (index % columns) * 42, train.x + 16, train.x + train.width - 16);
-  const y = train.y + 28 + Math.floor(index / columns) * 28;
+function enterTrainPoint(train: Rect, door: DoorConfig, index: number): Vec2 {
+  // 车内目标避开窗带和 HUD 覆盖区，落在门洞后方的地板上。
+  // 目标以所选车门为中心，先直穿门洞，再在车内形成三列小队。
+  const laneOffset = ((index % 3) - 1) * 18;
+  const x = clamp(door.center.x + laneOffset, train.x + 16, train.x + train.width - 16);
+  const interiorTop = train.y + Math.max(24, Math.min(train.height - 24, TRAIN_INTERIOR_TOP_OFFSET));
+  const y = interiorTop + Math.floor(index / 3) * TRAIN_INTERIOR_ROW_GAP;
   return clampPointToRect({ x, y }, train, 14);
+}
+
+function isDoorApproach(position: Vec2, radius: number, door: DoorConfig): boolean {
+  // 将站台安全区向门口延伸一小段，避免玩家站在安全区时把排队角色
+  // 推回去；真正的容量、开门和阻塞判定仍在 updatePassengers 中执行。
+  const padding = Math.max(8, radius * 1.5);
+  const left = door.center.x - door.width / 2 - padding;
+  const right = door.center.x + door.width / 2 + padding;
+  const top = Math.min(door.entryZone.y, door.safeZone.y);
+  const bottom = Math.max(
+    door.entryZone.y + door.entryZone.height,
+    door.safeZone.y + door.safeZone.height + padding,
+  );
+  return position.x >= left && position.x <= right && position.y >= top && position.y <= bottom;
 }
 
 /** 更新非玩家人群，并处理下车航点、上车容量和角色状态。 */
@@ -411,17 +434,19 @@ export function updatePassengers(
         x: clamp(door.center.x, walkableBounds.x + passenger.radius, walkableBounds.x + walkableBounds.width - passenger.radius),
         y: walkableBounds.y + 24,
       };
-      const insideEntry =
-        passenger.position.x >= door.entryZone.x &&
-        passenger.position.x <= door.entryZone.x + door.entryZone.width &&
-        passenger.position.y >= door.entryZone.y &&
-        passenger.position.y <= door.entryZone.y + door.entryZone.height;
+      const insideEntry = isDoorApproach(passenger.position, passenger.radius, door);
       const state = doorStateById(context.doorStates, door.id);
       const totalOccupancy = context.doorStates.reduce((sum, item) => sum + item.occupancy, 0);
       if (insideEntry && state && state.open && !state.blocked && totalOccupancy < context.carriageCapacity) {
         passenger.role = 'boarding';
         passenger.doorId = door.id;
-        passenger.target = enterTrainPoint(context.trainBounds, state.occupancy);
+        // 预约成功即跨过门槛内沿，随后再沿车内航点移动；这样“上车”不会
+        // 视觉上停留在站台等候区，也不会被门槛碰撞卡住。
+        passenger.position = {
+          x: door.center.x,
+          y: Math.min(passenger.position.y, door.center.y - Math.max(2, passenger.radius * 0.45)),
+        };
+        passenger.target = enterTrainPoint(context.trainBounds, door, state.occupancy);
         state.occupancy += 1; // 先预留座位，避免同一帧多个角色超卖容量。
         boarded += 1;
       } else {
@@ -435,11 +460,17 @@ export function updatePassengers(
 
     if (passenger.role === 'boarding') {
       const index = doorIndex.get(passenger.doorId ?? door.id) ?? 0;
+      const boardingDoor = doorConfigById(context.doors, passenger.doorId ?? door.id) ?? door;
       // target 已在转为 boarding 时固定；缺失时重新生成一个确定位置。
       if (!Number.isFinite(passenger.target.x) || !Number.isFinite(passenger.target.y)) {
-        passenger.target = enterTrainPoint(context.trainBounds, index);
+        passenger.target = enterTrainPoint(context.trainBounds, boardingDoor, index);
       }
-      advancePassenger(passenger, passenger.target, passenger.speed * dt, dt);
+      advancePassenger(
+        passenger,
+        passenger.target,
+        passenger.speed * BOARDING_SPEED_MULTIPLIER * dt,
+        dt,
+      );
       if (distance(passenger.position, passenger.target) <= 0.001) {
         passenger.role = 'inside';
         passenger.velocity = vec();
