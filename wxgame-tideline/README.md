@@ -29,10 +29,13 @@ wxgame-tideline/
 
 ## 用微信开发者工具打开
 
+> 导入目录必须是包含 `game.js`、`game.json` 和 `project.config.json` 的
+> `D:/测试/jiditie-main/wxgame-tideline`，不要选择上层 `jiditie-main` 网页目录。
+
 1. 在 `project.config.json` 中把 `appid` 替换成自己的小游戏 AppID；内部预览可暂时使用 `touristappid`。
 2. 在微信开发者工具中选择“小游戏”并导入本目录。
 3. 首次运行先在工程目录执行 `npm install`，再执行 `npm run build:wxgame` 生成 `dist/`；随后用微信开发者工具打开本目录即可运行 `game.js`。
-4. `game.js` 会创建 `GameRuntime`，启动路线页、触摸输入、固定步长循环和本地存档；若尚未构建，会显示离线提示而不会发起网络请求。
+4. `game.js` 会等待一轮 JSBridge 事件循环后创建 `GameRuntime`；若 bridge 暂时未就绪会有限重试。启动画面不会同步读取系统信息，构建缺失时会显示离线提示而不会发起网络请求。
 
 ## 独立创作与权利边界
 
