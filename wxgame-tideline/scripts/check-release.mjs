@@ -25,6 +25,8 @@ const REQUIRED_FILES = [
   'assets/ASSET_MANIFEST.md',
   'assets/design-tokens.json',
   'assets/generated/tideline-sprite.svg',
+  'assets/generated/tideline-player-sprite.svg',
+  'assets/generated/tideline-player-sprite.png',
   'assets/audio/tideline-loop.wav',
   'assets/audio/ui-guide.wav',
   'assets/audio/ui-success.wav',

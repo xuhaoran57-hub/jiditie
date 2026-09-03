@@ -67,6 +67,35 @@ function strokeLine(
   ctx.restore();
 }
 
+/** 横屏舞台纵向压缩世界层，状态文字需要恢复屏幕字号才能保持可读。 */
+function drawWorldText(
+  context: RenderContext,
+  text: string,
+  position: Vec2,
+  font: string,
+  color: string,
+): void {
+  const { ctx, layout } = context;
+  ctx.save();
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (layout.orientation === 'landscape') {
+    const scaleX = Number.isFinite(layout.worldScaleX) ? Math.abs(layout.worldScaleX) : layout.worldScale;
+    const scaleY = Number.isFinite(layout.worldScaleY) ? Math.abs(layout.worldScaleY) : layout.worldScale;
+    if (scaleX > 1e-8 && scaleY > 1e-8) {
+      ctx.translate(position.x, position.y);
+      ctx.scale(1, scaleX / scaleY);
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+      return;
+    }
+  }
+  ctx.fillText(text, position.x, position.y);
+  ctx.restore();
+}
+
 function drawBackdrop(context: RenderContext, world: Rect): void {
   const { ctx } = context;
   ctx.fillStyle = STATION_COLORS.sky;
@@ -385,11 +414,13 @@ function drawDoor(
   ctx.beginPath();
   ctx.arc(door.center.x, door.safeZone.y + door.safeZone.height - 8, 3, 0, Math.PI * 2);
   ctx.fill();
-  ctx.font = canvasFont(700, 9);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = frameColor;
-  ctx.fillText(blocked ? '避让' : open ? '可进' : '等待', door.center.x, door.safeZone.y + 8);
+  drawWorldText(
+    context,
+    blocked ? '避让' : open ? '可进' : '等待',
+    { x: door.center.x, y: door.safeZone.y + 8 },
+    canvasFont(700, 9),
+    frameColor,
+  );
   ctx.restore();
 }
 
@@ -425,11 +456,13 @@ function drawEventOverlay(context: RenderContext, state: GameState, platform: Re
     ctx.fillStyle = '#f1bd73';
     ctx.fillRect(zone.x + 9, zone.y + 12, zone.width - 18, 5);
     ctx.fillRect(zone.x + 9, zone.y + zone.height - 17, zone.width - 18, 5);
-    ctx.fillStyle = TIDELINE_TOKENS.color.luggageCartText;
-    ctx.font = canvasFont(700, 11);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('行李车', zone.x + zone.width / 2, zone.y + zone.height / 2);
+    drawWorldText(
+      context,
+      '行李车',
+      { x: zone.x + zone.width / 2, y: zone.y + zone.height / 2 },
+      canvasFont(700, 11),
+      TIDELINE_TOKENS.color.luggageCartText,
+    );
     ctx.restore();
   }
 }

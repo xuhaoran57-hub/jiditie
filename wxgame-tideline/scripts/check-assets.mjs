@@ -8,6 +8,8 @@ const manifestPath = resolve(assetsDir, 'ASSET_MANIFEST.md');
 
 const requiredFiles = [
   'generated/tideline-sprite.svg',
+  'generated/tideline-player-sprite.svg',
+  'generated/tideline-player-sprite.png',
   'audio/tideline-loop.wav',
   'audio/ui-guide.wav',
   'audio/ui-success.wav',
@@ -53,6 +55,24 @@ try {
   if (/(mtr|metro|subway|logo)/i.test(svg)) fail('SVG 含有受限品牌关键词');
 } catch (error) {
   fail(`SVG 无法读取：${error instanceof Error ? error.name : 'unknown'}`);
+}
+
+try {
+  const playerSvg = readFileSync(resolve(assetsDir, 'generated/tideline-player-sprite.svg'), 'utf8');
+  if (!playerSvg.includes('<svg') || !playerSvg.includes('</svg>')) fail('玩家 Sprite SVG 结构不完整');
+  if (!/width="256"[^>]*height="64"/.test(playerSvg)) fail('玩家 Sprite SVG 必须是 256x64 四帧图集');
+  if (/(mtr|metro|subway|logo)/i.test(playerSvg)) fail('玩家 Sprite SVG 含有受限品牌关键词');
+} catch (error) {
+  fail(`玩家 Sprite SVG 无法读取：${error instanceof Error ? error.name : 'unknown'}`);
+}
+
+try {
+  const playerPng = readFileSync(resolve(assetsDir, 'generated/tideline-player-sprite.png'));
+  const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (!playerPng.subarray(0, 8).equals(pngSignature)) fail('玩家 Sprite PNG 不是有效 PNG');
+  if (playerPng.length > 128 * 1024) fail('玩家 Sprite PNG 超过 128KB 包体预算');
+} catch (error) {
+  fail(`玩家 Sprite PNG 无法读取：${error instanceof Error ? error.name : 'unknown'}`);
 }
 
 for (const relative of requiredFiles.filter((file) => file.endsWith('.wav'))) {

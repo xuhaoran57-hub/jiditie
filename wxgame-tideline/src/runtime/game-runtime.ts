@@ -257,6 +257,7 @@ export class GameRuntime {
         canvasAdapter.viewport.dpr,
         canvasAdapter.viewport.insets,
         this.levels[0],
+        { imageFactory: canvasAdapter.imageFactory },
       );
     } else {
       throw new Error('GameRuntime requires a renderer or canvasAdapter');
@@ -785,14 +786,19 @@ export class GameRuntime {
     };
   }
 
-  /** 横屏画面将规则层旋转后显示，摇杆得到的屏幕方向需先还原到规则坐标。 */
+  /** 横屏舞台使用非等比缩放，摇杆方向需还原到规则坐标后再交给模拟层。 */
   private sampleSimulationInput(): SimulationInput {
     const input = this.input.sample();
-    const orientation = this.renderer.context.layout.orientation;
-    if (orientation !== 'landscape' || !input.move) return input;
+    const layout = this.renderer.context.layout;
+    if (layout.orientation !== 'landscape' || !input.move) return input;
     return {
       ...input,
-      move: screenDirectionToWorld(input.move, orientation),
+      move: screenDirectionToWorld(
+        input.move,
+        layout.orientation,
+        layout.worldScaleX,
+        layout.worldScaleY,
+      ),
     };
   }
 

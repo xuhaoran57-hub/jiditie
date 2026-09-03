@@ -50,7 +50,7 @@
 
 | 项目 | 当前状态 | M8 前动作 |
 |---|---|---|
-| `compileType` 为 `game`、竖屏和安全区配置 | 已自动检查 | 用正式项目配置复核 |
+| `compileType` 为 `game`、横屏和安全区配置 | 已自动检查 | 用正式项目配置复核 |
 | AppID | 仍为 `touristappid` 占位值 | 替换为主体已验证 AppID；运行 `--strict --production` |
 | 发布构建 | `dist/` 可由 `npm run build:wxgame` 重建 | 锁定版本号并归档构建日志 |
 | 调试接口、source map、外链资源 | 自动检查通过 | 发布包变更后重新审计 |

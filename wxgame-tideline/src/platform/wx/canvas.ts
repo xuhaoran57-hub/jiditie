@@ -1,4 +1,6 @@
 import type {
+  CanvasImageFactory,
+  CanvasImageLike,
   Canvas2DContextLike,
   CanvasLike,
   ViewportInsets,
@@ -28,6 +30,8 @@ export interface WxWindowInfoLike {
 /** 只声明本适配器实际使用的微信能力，便于 Node mock 和版本兼容。 */
 export interface WxCanvasApi {
   createCanvas(): CanvasLike;
+  /** 微信小游戏通过 wx.createImage 提供本地图片解码；缺失时由渲染层使用几何回退。 */
+  createImage?: () => CanvasImageLike;
   getWindowInfo?: () => WxWindowInfoLike;
   getSystemInfoSync?: () => WxWindowInfoLike;
 }
@@ -39,8 +43,9 @@ export interface WxCanvasAdapterOptions {
 }
 
 export const DEFAULT_CANVAS_OPTIONS: Required<WxCanvasAdapterOptions> = {
-  fallbackWidth: 375,
-  fallbackHeight: 667,
+  // game.json 固定使用横屏；bridge 尚未就绪时也先按横屏绘制，避免首帧闪成竖屏。
+  fallbackWidth: 667,
+  fallbackHeight: 375,
   maxDpr: 2,
 };
 
@@ -134,6 +139,10 @@ export class WxCanvasAdapter {
 
   get viewport(): ViewportMetrics {
     return this._viewport;
+  }
+
+  get imageFactory(): CanvasImageFactory | undefined {
+    return this.api.createImage?.bind(this.api);
   }
 
   /** 重新读取窗口/安全区信息并同步 Canvas 物理像素尺寸。 */

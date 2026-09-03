@@ -20,6 +20,18 @@ export interface Canvas2DContextLike {
   fillRect(x: number, y: number, width: number, height: number): void;
   strokeRect(x: number, y: number, width: number, height: number): void;
   clearRect(x: number, y: number, width: number, height: number): void;
+  /** 图片绘制在低版本/测试 mock 中可能不存在，调用方必须保留几何回退。 */
+  drawImage?(
+    image: CanvasImageLike,
+    sx: number,
+    sy: number,
+    sw: number,
+    sh: number,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+  ): void;
   fillText(text: string, x: number, y: number, maxWidth?: number): void;
   strokeText?(text: string, x: number, y: number, maxWidth?: number): void;
   measureText?(text: string): { width: number };
@@ -65,11 +77,17 @@ export interface ViewportMetrics {
 
 export interface RenderLayout {
   viewport: ViewportMetrics;
-  /** 当前画布方向；横屏时将规则层坐标逆时针旋转 90° 显示。 */
+  /** 当前画布方向；横屏使用独立的车厢上/站台下构图。 */
   orientation: WorldOrientation;
   worldBounds: Rect;
-  /** 应用显示方向后的世界包围盒，用于计算缩放和居中。 */
+  /** 规则世界的包围盒（保留该字段供调试和外部布局读取）。 */
   displayWorldBounds: Rect;
+  /** 世界在屏幕上的实际舞台区域。 */
+  worldRect: Rect;
+  /** 规则坐标到屏幕坐标的两个轴向缩放。横屏为有意的纵向压缩。 */
+  worldScaleX: number;
+  worldScaleY: number;
+  /** 兼容旧调用方的缩放值；横屏取两个轴中较小者。 */
   worldScale: number;
   worldOffset: Vec2;
   hudRect: Rect;
@@ -92,37 +110,63 @@ function orientationFor(viewport: ViewportMetrics): WorldOrientation {
   return viewport.contentRect.width >= viewport.contentRect.height ? 'landscape' : 'portrait';
 }
 
-/** 将规则层的竖屏坐标映射为横屏画布坐标：车厢在左、站台在右。 */
-function worldToDisplay(point: Vec2, orientation: WorldOrientation): Vec2 {
-  return orientation === 'landscape'
-    ? { x: point.y, y: -point.x }
-    : { ...point };
+/** 不引入浏览器 DOM 类型的最小图片接口，兼容 wx.createImage 和 Node mock。 */
+export interface CanvasImageLike {
+  src?: string;
+  width?: number;
+  height?: number;
+  complete?: boolean;
+  onload?: () => void;
+  onerror?: () => void;
 }
 
-function displayToWorld(point: Vec2, orientation: WorldOrientation): Vec2 {
-  return orientation === 'landscape'
-    ? { x: -point.y, y: point.x }
-    : { ...point };
+export type CanvasImageFactory = () => CanvasImageLike;
+
+function finiteScale(value: number | undefined, fallback = 1): number {
+  return Number.isFinite(value) && value !== undefined && Math.abs(value) > 1e-8
+    ? Math.abs(value)
+    : fallback;
 }
 
-function displayBoundsFor(worldBounds: Rect, orientation: WorldOrientation): Rect {
-  if (orientation === 'portrait') return { ...worldBounds };
-  return {
-    x: worldBounds.y,
-    y: -(worldBounds.x + worldBounds.width),
-    width: worldBounds.height,
-    height: worldBounds.width,
-  };
+function normalizedDirection(x: number, y: number): Vec2 {
+  const length = Math.hypot(x, y);
+  if (!Number.isFinite(length) || length <= 1e-8) return { x: 0, y: 0 };
+  return { x: x / length, y: y / length };
 }
 
-/** 将规则层方向（例如玩家朝向）转换成屏幕方向，供屏幕空间控件使用。 */
-export function worldDirectionToScreen(direction: Vec2, orientation: WorldOrientation): Vec2 {
-  return worldToDisplay(direction, orientation);
+/** 横屏不再旋转规则世界；车厢保持在规则坐标的上方，屏幕方向直观对应规则方向。 */
+function worldToDisplay(point: Vec2): Vec2 {
+  return { ...point };
 }
 
-/** 将屏幕方向转换成规则层方向，供摇杆/键盘输入进入模拟前使用。 */
-export function screenDirectionToWorld(direction: Vec2, orientation: WorldOrientation): Vec2 {
-  return displayToWorld(direction, orientation);
+function displayToWorld(point: Vec2): Vec2 {
+  return { ...point };
+}
+
+/** 将规则层方向转换成屏幕方向，并补偿横屏舞台的轴向缩放。 */
+export function worldDirectionToScreen(
+  direction: Vec2,
+  _orientation: WorldOrientation,
+  scaleX = 1,
+  scaleY = 1,
+): Vec2 {
+  return normalizedDirection(
+    direction.x * finiteScale(scaleX),
+    direction.y * finiteScale(scaleY),
+  );
+}
+
+/** 将屏幕方向还原为规则层方向，供摇杆输入进入模拟前使用。 */
+export function screenDirectionToWorld(
+  direction: Vec2,
+  _orientation: WorldOrientation,
+  scaleX = 1,
+  scaleY = 1,
+): Vec2 {
+  return normalizedDirection(
+    direction.x / finiteScale(scaleX),
+    direction.y / finiteScale(scaleY),
+  );
 }
 
 export function createViewportMetrics(
@@ -165,40 +209,89 @@ export function createRenderLayout(
 ): RenderLayout {
   const content = viewport.contentRect;
   const orientation = orientationFor(viewport);
-  const displayWorldBounds = displayBoundsFor(worldBounds, orientation);
-  const worldScale = Math.max(
-    0.05,
-    Math.min(content.width / Math.max(displayWorldBounds.width, 1), content.height / Math.max(displayWorldBounds.height, 1)),
-  );
+  const displayWorldBounds = { ...worldBounds };
+  let worldRect: Rect;
+  let worldScaleX: number;
+  let worldScaleY: number;
+  let worldScale: number;
+
+  if (orientation === 'landscape') {
+    // 横屏使用独立舞台：HUD 改为左侧悬浮卡片，顶部空间交给车厢，
+    // 底部仍留给操作区，规则世界不旋转，因而车厢自然位于站台上方。
+    // 横向拉伸让 320 逻辑宽度真正利用横屏空间，
+    // 角色绘制层会用同一屏幕尺度补偿纵向压缩。
+    const sideMargin = clamp(content.width * 0.025, 12, 24);
+    const topInset = clamp(content.height * 0.05, 16, 24);
+    const bottomInset = clamp(content.height * 0.035, 10, 14);
+    worldRect = {
+      x: content.x + sideMargin,
+      y: content.y + topInset,
+      width: Math.max(1, content.width - sideMargin * 2),
+      height: Math.max(1, content.height - topInset - bottomInset),
+    };
+    worldScaleX = Math.max(0.05, worldRect.width / Math.max(worldBounds.width, 1));
+    worldScaleY = Math.max(0.05, worldRect.height / Math.max(worldBounds.height, 1));
+    worldScale = Math.min(worldScaleX, worldScaleY);
+  } else {
+    worldScale = Math.max(
+      0.05,
+      Math.min(content.width / Math.max(worldBounds.width, 1), content.height / Math.max(worldBounds.height, 1)),
+    );
+    worldScaleX = worldScale;
+    worldScaleY = worldScale;
+    worldRect = {
+      x: content.x + (content.width - worldBounds.width * worldScale) / 2,
+      y: content.y + (content.height - worldBounds.height * worldScale) / 2,
+      width: worldBounds.width * worldScale,
+      height: worldBounds.height * worldScale,
+    };
+  }
+
   const worldOffset: Vec2 = {
-    x: content.x + (content.width - displayWorldBounds.width * worldScale) / 2 - displayWorldBounds.x * worldScale,
-    y: content.y + (content.height - displayWorldBounds.height * worldScale) / 2 - displayWorldBounds.y * worldScale,
+    x: worldRect.x - worldBounds.x * worldScaleX,
+    y: worldRect.y - worldBounds.y * worldScaleY,
   };
   const hudRect: Rect = {
-    x: content.x + 12,
+    x: orientation === 'landscape' ? content.x + 10 : content.x + 12,
     y: content.y + 10,
-    width: Math.max(0, content.width - 24),
-    height: 58,
+    width: orientation === 'landscape'
+      ? clamp(content.width * 0.16, 96, 112)
+      : Math.max(0, content.width - 24),
+    height: orientation === 'landscape'
+      ? clamp(content.height * 0.34, 112, 136)
+      : 58,
   };
+  const resultMargin = orientation === 'landscape'
+    ? Math.max(14, content.width * 0.06)
+    : Math.max(12, content.width * 0.08);
+  const resultY = orientation === 'landscape'
+    ? content.y + Math.min(86, Math.max(70, content.height * 0.18))
+    : content.y + Math.max(90, content.height * 0.15);
   const resultRect: Rect = {
-    x: content.x + Math.max(12, content.width * 0.08),
-    y: content.y + Math.max(90, content.height * 0.15),
-    width: Math.max(0, content.width - Math.max(24, content.width * 0.16)),
-    height: Math.max(180, content.height * 0.56),
+    x: content.x + resultMargin,
+    y: resultY,
+    width: Math.max(1, content.width - resultMargin * 2),
+    height: orientation === 'landscape'
+      ? Math.max(160, content.y + content.height - resultY - 12)
+      : Math.max(180, content.height * 0.56),
   };
   const pauseButtonRect: Rect = {
-    x: hudRect.x + hudRect.width - 48,
-    y: hudRect.y + hudRect.height + 8,
-    width: 40,
-    height: 30,
+    x: orientation === 'landscape'
+      ? hudRect.x + hudRect.width - 46
+      : hudRect.x + hudRect.width - 48,
+    y: orientation === 'landscape'
+      ? hudRect.y + 6
+      : hudRect.y + hudRect.height + 8,
+    width: orientation === 'landscape' ? 40 : 40,
+    height: orientation === 'landscape' ? 30 : 30,
   };
   const resultButtonHeight = 38;
-  const resultButtonGap = 8;
+  const resultButtonGap = orientation === 'landscape' ? 10 : 8;
   const resultButtonWidth = Math.max(
     48,
-    Math.min(112, (resultRect.width - 32 - resultButtonGap * 2) / 3),
+    Math.min(orientation === 'landscape' ? 132 : 112, (resultRect.width - 32 - resultButtonGap * 2) / 3),
   );
-  const resultButtonY = resultRect.y + resultRect.height - 74;
+  const resultButtonY = resultRect.y + resultRect.height - (orientation === 'landscape' ? 62 : 74);
   const resultButtonStartX = resultRect.x + (resultRect.width - resultButtonWidth * 3 - resultButtonGap * 2) / 2;
   const resultRetryRect: Rect = {
     x: resultButtonStartX,
@@ -235,6 +328,9 @@ export function createRenderLayout(
     orientation,
     worldBounds: { ...worldBounds },
     displayWorldBounds,
+    worldRect,
+    worldScaleX,
+    worldScaleY,
     worldScale,
     worldOffset,
     hudRect,
@@ -256,12 +352,19 @@ export function createRenderLayout(
 export function routeCardRect(viewport: ViewportMetrics, index: number): Rect {
   const content = viewport.contentRect;
   const safeIndex = Number.isFinite(index) ? Math.max(0, Math.floor(index)) : 0;
-  const cardHeight = 112;
-  const gap = 14;
   const landscape = content.width >= content.height;
+  const gap = landscape ? clamp(content.width * 0.018, 10, 14) : 14;
   const columns = landscape
-    ? (content.width >= 560 ? 3 : content.width >= 360 ? 2 : 1)
+    ? (content.width >= 560 ? 3 : content.width >= 300 ? 2 : 1)
     : 1;
+  const top = landscape
+    ? content.y + clamp(content.height * 0.24, 88, 104)
+    : content.y + 122;
+  const maxRows = Math.ceil(3 / columns);
+  const availableHeight = content.height - (top - content.y) - 24 - gap * Math.max(0, maxRows - 1);
+  const cardHeight = landscape
+    ? Math.max(1, Math.min(104, availableHeight / maxRows))
+    : 112;
   const cardWidth = landscape
     ? Math.min(300, Math.max(0, (content.width - 32 - gap * (columns - 1)) / columns))
     : Math.min(300, Math.max(0, content.width - 32));
@@ -270,7 +373,7 @@ export function routeCardRect(viewport: ViewportMetrics, index: number): Rect {
   const totalWidth = cardWidth * columns + gap * (columns - 1);
   return {
     x: content.x + (content.width - totalWidth) / 2 + column * (cardWidth + gap),
-    y: content.y + 122 + row * (cardHeight + gap),
+    y: top + row * (cardHeight + gap),
     width: cardWidth,
     height: cardHeight,
   };
@@ -290,27 +393,29 @@ export class RenderContext {
   }
 
   worldToScreen(point: Vec2): Vec2 {
-    const displayPoint = worldToDisplay(point, this.layout.orientation);
+    const displayPoint = worldToDisplay(point);
     return {
-      x: this.layout.worldOffset.x + displayPoint.x * this.layout.worldScale,
-      y: this.layout.worldOffset.y + displayPoint.y * this.layout.worldScale,
+      x: this.layout.worldOffset.x + displayPoint.x * finiteScale(this.layout.worldScaleX, this.layout.worldScale),
+      y: this.layout.worldOffset.y + displayPoint.y * finiteScale(this.layout.worldScaleY, this.layout.worldScale),
     };
   }
 
   screenToWorld(point: Vec2): Vec2 {
     const displayPoint = {
-      x: (point.x - this.layout.worldOffset.x) / this.layout.worldScale,
-      y: (point.y - this.layout.worldOffset.y) / this.layout.worldScale,
+      x: (point.x - this.layout.worldOffset.x) / finiteScale(this.layout.worldScaleX, this.layout.worldScale),
+      y: (point.y - this.layout.worldOffset.y) / finiteScale(this.layout.worldScaleY, this.layout.worldScale),
     };
-    return displayToWorld(displayPoint, this.layout.orientation);
+    return displayToWorld(displayPoint);
   }
 
   withWorld(draw: () => void): void {
     const { ctx, layout } = this;
     ctx.save();
     ctx.translate(layout.worldOffset.x, layout.worldOffset.y);
-    ctx.scale(layout.worldScale, layout.worldScale);
-    if (layout.orientation === 'landscape') ctx.rotate(-Math.PI / 2);
+    ctx.scale(
+      finiteScale(layout.worldScaleX, layout.worldScale),
+      finiteScale(layout.worldScaleY, layout.worldScale),
+    );
     draw();
     ctx.restore();
   }

@@ -6,3 +6,4 @@ export * from './canvas-ui.ts';
 export * from './game-renderer.ts';
 export * from './design-tokens.ts';
 export * from './asset-registry.ts';
+export * from './player-sprite.ts';

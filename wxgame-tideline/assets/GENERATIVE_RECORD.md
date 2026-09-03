@@ -20,3 +20,10 @@
 
 上述内容为本项目自有制作/生成结果。最终项目许可证尚待作者确认；在许可证
 冻结前不得把本目录资源单独标记为 MIT/Apache-2.0 或向第三方再授权。
+
+## 玩家 Sprite 样板
+
+- 文件：`generated/tideline-player-sprite.svg`
+- 运行时文件：`generated/tideline-player-sprite.png`，由 `scripts/generate-player-sprite.py` 从同一套几何规范栅格化生成。
+- 制作方式：项目内手工绘制的 256x64 四帧 SVG 图集，帧 0 为待机，帧 1/2 为行走，帧 3 为疏导挥手。
+- 使用方式：渲染层通过 `wx.createImage` 可选加载；图片不可用时回退到 Canvas 几何角色。

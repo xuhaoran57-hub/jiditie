@@ -1,7 +1,8 @@
 import type { GameState, LevelConfig, Passenger, PassengerKind, Vec2 } from '../core/types.ts';
-import { normalize } from '../core/vector.ts';
+import { clamp, normalize } from '../core/vector.ts';
 import { fillRoundRect, RenderContext, strokeRoundRect } from './context.ts';
 import { TIDELINE_TOKENS } from './design-tokens.ts';
+import type { PlayerSpriteAsset } from './player-sprite.ts';
 
 interface CharacterPalette {
   shirt: string;
@@ -66,6 +67,16 @@ const PASSENGER_PALETTES: Record<PassengerKind, CharacterPalette> = {
 const PASSENGER_COLORS: Record<PassengerKind, string> = Object.fromEntries(
   (Object.entries(PASSENGER_PALETTES) as Array<[PassengerKind, CharacterPalette]>).map(([kind, palette]) => [kind, palette.shirt]),
 ) as Record<PassengerKind, string>;
+
+// 横屏舞台会把规则世界压到较薄的纵向区域。角色补回纵向比例后，
+// 仍需用更小的统一视觉尺寸，才能和横屏车门/车厢的实际像素高度匹配。
+const LANDSCAPE_ACTOR_SCALE = 0.48;
+
+function actorVisualScale(context: RenderContext, baseScale: number): number {
+  return context.layout.orientation === 'landscape'
+    ? baseScale * LANDSCAPE_ACTOR_SCALE
+    : baseScale;
+}
 
 function drawCircle(
   context: RenderContext,
@@ -134,19 +145,74 @@ function actorSeed(id: string): number {
   return (hash >>> 0) / 4294967296;
 }
 
+const GUIDE_ACTION_LIFE = 0.8;
+
+function latestGuideAge(state: GameState): number {
+  let latest = -Infinity;
+  for (const event of state.events) {
+    if (event.type !== 'guide' || !Number.isFinite(event.at) || event.at > state.elapsed + 1e-8) continue;
+    latest = Math.max(latest, event.at);
+  }
+  return latest === -Infinity ? -1 : Math.max(0, state.elapsed - latest);
+}
+
+function guideActionStrength(state: GameState): number {
+  const age = latestGuideAge(state);
+  return age >= 0 && age < GUIDE_ACTION_LIFE
+    ? clamp(1 - age / GUIDE_ACTION_LIFE, 0, 1)
+    : 0;
+}
+
+function drawPlayerSprite(
+  context: RenderContext,
+  sprite: PlayerSpriteAsset,
+  frameIndex: number,
+  size: number,
+): boolean {
+  const { ctx } = context;
+  if (!sprite.ready || sprite.failed || typeof ctx.drawImage !== 'function') return false;
+  const frame = sprite.frames[frameIndex % sprite.frames.length];
+  if (!frame) return false;
+  try {
+    ctx.drawImage(
+      sprite.image,
+      frame.sx,
+      frame.sy,
+      frame.width,
+      frame.height,
+      -size / 2,
+      -size / 2,
+      size,
+      size,
+    );
+    return true;
+  } catch {
+    // 图片解码或低版本 Canvas 不支持时，调用方继续绘制几何角色。
+    return false;
+  }
+}
+
+/**
+ * 横屏舞台会把规则世界纵向压缩，以便同时容纳车厢和站台。
+ * 角色是屏幕上的信息载体，绘制时补回纵向比例，保持接近等比的轮廓。
+ */
+function compensateLandscapeScale(context: RenderContext): void {
+  const { layout, ctx } = context;
+  if (layout.orientation !== 'landscape') return;
+  const scaleX = Number.isFinite(layout.worldScaleX) ? Math.abs(layout.worldScaleX) : layout.worldScale;
+  const scaleY = Number.isFinite(layout.worldScaleY) ? Math.abs(layout.worldScaleY) : layout.worldScale;
+  if (scaleX <= 1e-8 || scaleY <= 1e-8) return;
+  ctx.scale(1, scaleX / scaleY);
+}
+
 function drawShadow(context: RenderContext, position: Vec2, radius: number, alpha = 0.42): void {
   const shadow = { x: position.x, y: position.y + radius * 0.78 };
   const { ctx } = context;
   ctx.save();
   ctx.globalAlpha = alpha;
-  if (context.layout.orientation === 'landscape') {
-    // 世界层旋转后，阴影也反向旋回，仍保持屏幕水平方向贴地。
-    ctx.translate(shadow.x, shadow.y);
-    ctx.rotate(Math.PI / 2);
-    drawEllipse(context, { x: 0, y: 0 }, radius * 0.78, radius * 0.28, '#102b3a');
-  } else {
-    drawEllipse(context, shadow, radius * 0.78, radius * 0.28, '#102b3a');
-  }
+  ctx.translate(shadow.x, shadow.y);
+  compensateLandscapeScale(context);
+  drawEllipse(context, { x: 0, y: 0 }, radius * 0.78, radius * 0.28, '#102b3a');
   ctx.restore();
 }
 
@@ -155,9 +221,9 @@ function drawMiniCompanion(context: RenderContext, palette: CharacterPalette, of
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(offset.x, offset.y);
-  // 世界层横屏时逆时针旋转，角色几何体反向旋回，保证头部始终朝屏幕上方。
-  if (context.layout.orientation === 'landscape') ctx.rotate(Math.PI / 2);
-  ctx.scale(0.7, 0.7);
+  compensateLandscapeScale(context);
+  const scale = actorVisualScale(context, 0.7);
+  ctx.scale(scale, scale);
   drawEllipse(context, { x: 0, y: 5 }, 7, 3, '#173348');
   ctx.fillStyle = palette.pants;
   ctx.fillRect(-4, 1, 8, 9);
@@ -185,9 +251,9 @@ function drawCharacterBody(
   const oppositeStride = Math.sin(walkPhase + Math.PI) * 1.8;
 
   ctx.save();
-  // 角色不跟随横屏世界层旋转，始终保持头朝屏幕上方。
-  if (context.layout.orientation === 'landscape') ctx.rotate(Math.PI / 2);
-  ctx.scale(scale, scale);
+  compensateLandscapeScale(context);
+  const visualScale = actorVisualScale(context, scale);
+  ctx.scale(visualScale, visualScale);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
@@ -303,6 +369,11 @@ function drawPassenger(context: RenderContext, passenger: Passenger, now: number
   const phase = actorSeed(passenger.id) * Math.PI * 2;
   const walkPhase = now * (passenger.kind === 'fast' ? 11 : passenger.kind === 'slow' ? 4.5 : 7) + phase;
   const moving = passenger.role !== 'waiting' && passenger.role !== 'inside';
+  const guideRemaining = Math.max(0, passenger.guidedUntil - now);
+  const guideStrength = clamp(guideRemaining / 0.7, 0, 1);
+  const guideBob = guideStrength > 0
+    ? Math.sin(now * 18 + phase) * 1.2 * guideStrength
+    : 0;
   const alphaBefore = ctx.globalAlpha;
   if (inside || boarding) {
     // 车内角色使用地板反光和高对比轮廓，明确表示已经越过门槛。
@@ -324,19 +395,47 @@ function drawPassenger(context: RenderContext, passenger: Passenger, now: number
   // 身体几何以角色位置为局部原点；没有这次平移时，头/身体会落在世界原点，
   // 乘客虽然在规则层移动，画面里却看起来像没有跟着走。
   ctx.save();
-  ctx.translate(passenger.position.x, passenger.position.y);
+  ctx.translate(passenger.position.x, passenger.position.y - Math.abs(guideBob) * 0.25);
+  if (guideStrength > 0) {
+    const squash = 1 + Math.sin(now * 18 + phase) * 0.035 * guideStrength;
+    ctx.scale(squash, 1 - (squash - 1));
+  }
   // 角色始终以屏幕上方为头部方向；行走状态只改变步伐，不旋转人物轮廓。
   drawCharacterBody(context, palette, passenger.radius, moving ? walkPhase : phase, passenger.kind, inside || boarding);
   ctx.restore();
+  if (guideStrength > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.32 + guideStrength * 0.46;
+    ctx.strokeStyle = TIDELINE_TOKENS.color.safe;
+    ctx.lineWidth = 1.5;
+    const sparkle = passenger.radius + 5 + (1 - guideStrength) * 4;
+    ctx.beginPath();
+    ctx.moveTo(passenger.position.x - sparkle, passenger.position.y - sparkle * 0.25);
+    ctx.lineTo(passenger.position.x - sparkle + 3, passenger.position.y - sparkle * 0.25);
+    ctx.moveTo(passenger.position.x + sparkle, passenger.position.y - sparkle * 0.25);
+    ctx.lineTo(passenger.position.x + sparkle - 3, passenger.position.y - sparkle * 0.25);
+    ctx.stroke();
+    ctx.restore();
+  }
   ctx.globalAlpha = alphaBefore;
 }
 
-function drawPlayer(context: RenderContext, state: GameState): void {
+function drawPlayer(
+  context: RenderContext,
+  state: GameState,
+  playerSprite?: PlayerSpriteAsset,
+): void {
   const { ctx } = context;
   const player = state.player;
   const direction = normalize(player.facing, { x: 0, y: -1 });
   const phase = state.elapsed * 8;
   const stride = Math.sin(phase) * 1.8;
+  const moving = Math.hypot(player.velocity.x, player.velocity.y) > 1e-3;
+  const guideAge = latestGuideAge(state);
+  const guideStrength = guideActionStrength(state);
+  const bob = moving
+    ? Math.abs(Math.sin(state.elapsed * 12)) * 1.2
+    : Math.sin(state.elapsed * 3.2) * 0.55;
 
   drawShadow(context, player.position, player.radius, 0.52);
   ctx.save();
@@ -345,13 +444,31 @@ function drawPlayer(context: RenderContext, state: GameState): void {
     drawCircle(context, player.position, player.radius + 11 + Math.sin(state.elapsed * 6) * 1.5, TIDELINE_TOKENS.color.safe);
     ctx.globalAlpha = 1;
   }
-  ctx.translate(player.position.x, player.position.y);
-  // 玩家角色保持屏幕朝向；移动箭头在世界层中绘制，仍然指向真实行进方向。
-  if (context.layout.orientation === 'landscape') ctx.rotate(Math.PI / 2);
-  ctx.scale(Math.max(0.78, Math.min(1.55, player.radius / 10)), Math.max(0.78, Math.min(1.55, player.radius / 10)));
+  ctx.translate(player.position.x, player.position.y - bob * 0.22);
+  compensateLandscapeScale(context);
+  const scale = Math.max(0.78, Math.min(1.55, player.radius / 10));
+  const visualScale = actorVisualScale(context, scale);
+  const squash = moving
+    ? 1 + Math.sin(state.elapsed * 12) * 0.035
+    : 1 + Math.sin(state.elapsed * 3.2) * 0.02;
+  ctx.scale(visualScale * squash, visualScale * (1 - (squash - 1)));
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
+  const frameDuration = Number.isFinite(playerSprite?.frameDuration) && (playerSprite?.frameDuration ?? 0) > 0
+    ? playerSprite!.frameDuration
+    : 0.1;
+  const spriteFrame = guideStrength > 0
+    ? (guideAge < 0.16 || Math.floor(guideAge * 12) % 2 === 0 ? 3 : 0)
+    : moving
+      ? 1 + (Math.floor(state.elapsed / frameDuration) % 2)
+      : 0;
+  const spriteSize = Math.max(30, Math.min(46, player.radius * 3.5));
+  const spriteDrawn = playerSprite
+    ? drawPlayerSprite(context, playerSprite, spriteFrame, spriteSize)
+    : false;
+
+  if (!spriteDrawn) {
   // 玩家专属背包、靴子和潮汐青外套。
   fillRoundRect(ctx, -8, -1, 5, 12, 2, '#28445a');
   ctx.strokeStyle = '#67d8d0';
@@ -389,13 +506,16 @@ function drawPlayer(context: RenderContext, state: GameState): void {
   ctx.lineTo(0, 2);
   ctx.lineTo(3.2, -1);
   ctx.stroke();
+  const guideLift = guideStrength > 0
+    ? 2 + Math.sin(state.elapsed * 18) * 1.5
+    : 0;
   ctx.strokeStyle = '#f2c7a5';
   ctx.lineWidth = 2.6;
   ctx.beginPath();
   ctx.moveTo(-5.2, 0);
-  ctx.lineTo(-7.8, 4 - stride * 0.45);
+  ctx.lineTo(-7.8, 4 - stride * 0.45 - guideLift);
   ctx.moveTo(5.2, 0);
-  ctx.lineTo(7.8, 4 + stride * 0.45);
+  ctx.lineTo(7.8, 4 + stride * 0.45 - guideLift);
   ctx.stroke();
   drawCircle(context, { x: 0, y: -7.8 }, 5, '#f3c5a2', TIDELINE_TOKENS.color.outline, 1.7);
   ctx.fillStyle = '#152c44';
@@ -410,6 +530,7 @@ function drawPlayer(context: RenderContext, state: GameState): void {
   fillRoundRect(ctx, 2.7, 0.5, 4.3, 5.2, 1, '#f5cb66');
   ctx.fillStyle = '#fff4c6';
   ctx.fillRect(3.5, 1.3, 2.7, 1.2);
+  }
   ctx.restore();
 
   // 朝向箭头从身体外伸出，安全区时再叠一圈柔和的反馈。
@@ -435,6 +556,7 @@ export function renderActors(
   renderContext: RenderContext,
   state: GameState,
   _level: LevelConfig,
+  playerSprite?: PlayerSpriteAsset,
 ): void {
   renderContext.withWorld(() => {
     // 先画车内的半透明乘客，再按 y 从后到前画站台角色，最后画玩家。
@@ -447,7 +569,7 @@ export function renderActors(
         return left.position.y - right.position.y;
       });
     for (const passenger of passengers) drawPassenger(renderContext, passenger, state.elapsed);
-    drawPlayer(renderContext, state);
+    drawPlayer(renderContext, state, playerSprite);
   });
 }
 

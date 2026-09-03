@@ -1,6 +1,6 @@
 import type { GameState, LevelConfig, Rect } from '../core/types.ts';
 import { renderActors } from './actor-renderer.ts';
-import type { CanvasLike, ViewportInsets } from './context.ts';
+import type { CanvasImageFactory, CanvasLike, ViewportInsets } from './context.ts';
 import {
   createViewportMetrics,
   configureCanvas,
@@ -15,6 +15,7 @@ import {
   renderRoutePage,
 } from './canvas-ui.ts';
 import { renderStation } from './station-renderer.ts';
+import { loadPlayerSprite, type PlayerSpriteAsset } from './player-sprite.ts';
 
 export type RenderScreen = 'game' | 'route' | 'result';
 
@@ -25,6 +26,12 @@ export interface RenderOptions {
   levels?: readonly LevelConfig[];
   unlockedLevelIds?: readonly string[];
   selectedLevelIndex?: number;
+}
+
+export interface RenderAssetOptions {
+  /** 可选的微信图片工厂；未提供或解码失败时继续使用几何角色。 */
+  imageFactory?: CanvasImageFactory;
+  playerSprite?: PlayerSpriteAsset;
 }
 
 function worldBoundsFor(level: LevelConfig): Rect {
@@ -44,13 +51,16 @@ function worldBoundsFor(level: LevelConfig): Rect {
 export class GameRenderer {
   readonly context: RenderContext;
   private readonly canvas?: CanvasLike;
+  readonly playerSprite?: PlayerSpriteAsset;
 
   constructor(
     context: RenderContext,
     canvas?: CanvasLike,
+    assets: RenderAssetOptions = {},
   ) {
     this.context = context;
     this.canvas = canvas;
+    this.playerSprite = assets.playerSprite ?? loadPlayerSprite(assets.imageFactory);
   }
 
   static fromCanvas(
@@ -60,13 +70,14 @@ export class GameRenderer {
     dpr = 1,
     insets: ViewportInsets = {},
     level?: LevelConfig,
+    assets: RenderAssetOptions = {},
   ): GameRenderer {
     const context = canvas.getContext?.('2d');
     if (!context) throw new Error('a 2d canvas context is required');
     const viewport = createViewportMetrics(width, height, dpr, insets);
     configureCanvas(canvas, context, viewport);
     const fallbackWorld: Rect = level ? worldBoundsFor(level) : { x: 0, y: -160, width: 320, height: 728 };
-    return new GameRenderer(new RenderContext(context, viewport, fallbackWorld), canvas);
+    return new GameRenderer(new RenderContext(context, viewport, fallbackWorld), canvas, assets);
   }
 
   resize(width: number, height: number, dpr = this.context.layout.viewport.dpr, insets: ViewportInsets = this.context.layout.viewport.insets): void {
@@ -102,7 +113,7 @@ export class GameRenderer {
     }
     this.context.clear('#0b1627');
     renderStation(this.context, level, state);
-    renderActors(this.context, state, level);
+    renderActors(this.context, state, level, this.playerSprite);
     renderEffects(this.context, level, state);
     renderHud(this.context, level, state);
 

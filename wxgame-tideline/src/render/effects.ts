@@ -1,5 +1,5 @@
 import type { GameState, LevelConfig, Passenger } from '../core/types.ts';
-import { clamp } from '../core/vector.ts';
+import { clamp, normalize } from '../core/vector.ts';
 import { RenderContext } from './context.ts';
 import { TIDELINE_TOKENS } from './design-tokens.ts';
 
@@ -11,18 +11,116 @@ function findPassenger(state: GameState, id: string): Passenger | undefined {
   return state.passengers.find((passenger) => passenger.id === id);
 }
 
+const GUIDE_EFFECT_LIFE = 0.8;
+
+function drawGuideWave(context: RenderContext, state: GameState, age: number): void {
+  if (age < 0 || age >= GUIDE_EFFECT_LIFE) return;
+  const { ctx } = context;
+  const progress = clamp(age / 0.55, 0, 1);
+  const alpha = clamp(0.58 * (1 - age / GUIDE_EFFECT_LIFE), 0, 0.58);
+  const facing = normalize(state.player.facing, { x: 0, y: -1 });
+  const angle = Math.atan2(facing.y, facing.x);
+  const radius = state.player.radius + 10 + progress * 30;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = TIDELINE_TOKENS.color.safe;
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(state.player.position.x, state.player.position.y, radius, angle - 0.55, angle + 0.55);
+  ctx.stroke();
+  ctx.globalAlpha = alpha * 0.7;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(
+    state.player.position.x + facing.x * (state.player.radius + 5),
+    state.player.position.y + facing.y * (state.player.radius + 5),
+  );
+  ctx.lineTo(
+    state.player.position.x + Math.cos(angle - 0.55) * radius,
+    state.player.position.y + Math.sin(angle - 0.55) * radius,
+  );
+  ctx.moveTo(
+    state.player.position.x + facing.x * (state.player.radius + 5),
+    state.player.position.y + facing.y * (state.player.radius + 5),
+  );
+  ctx.lineTo(
+    state.player.position.x + Math.cos(angle + 0.55) * radius,
+    state.player.position.y + Math.sin(angle + 0.55) * radius,
+  );
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGuideBeam(
+  context: RenderContext,
+  state: GameState,
+  passenger: Passenger,
+  age: number,
+  index: number,
+): void {
+  if (age < 0 || age >= GUIDE_EFFECT_LIFE) return;
+  const { ctx } = context;
+  const progress = clamp(age / 0.32, 0, 1);
+  const eased = 1 - (1 - progress) ** 3;
+  const facing = normalize(state.player.facing, { x: 0, y: -1 });
+  const start = {
+    x: state.player.position.x + facing.x * (state.player.radius + 5),
+    y: state.player.position.y + facing.y * (state.player.radius + 5),
+  };
+  const head = {
+    x: start.x + (passenger.position.x - start.x) * eased,
+    y: start.y + (passenger.position.y - start.y) * eased,
+  };
+  const side = index % 2 === 0 ? 1 : -1;
+  ctx.save();
+  ctx.globalAlpha = clamp(0.72 * (1 - age / GUIDE_EFFECT_LIFE), 0, 0.72);
+  ctx.strokeStyle = TIDELINE_TOKENS.color.safe;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(head.x, head.y);
+  ctx.stroke();
+  ctx.fillStyle = TIDELINE_TOKENS.color.gold;
+  ctx.beginPath();
+  ctx.arc(
+    head.x + side * Math.sin(age * 16 + index) * 2,
+    head.y - 2,
+    2.4 + (1 - eased) * 1.6,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawGuideEffect(context: RenderContext, passenger: Passenger, age: number): void {
   const { ctx } = context;
-  const life = 0.55;
+  const life = GUIDE_EFFECT_LIFE;
   const alpha = clamp(1 - age / life, 0, 1);
   if (alpha <= 0) return;
+  const progress = clamp(age / life, 0, 1);
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = TIDELINE_TOKENS.color.safe;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(passenger.position.x, passenger.position.y, passenger.radius + 8 + age * 14, 0, Math.PI * 2);
+  ctx.arc(passenger.position.x, passenger.position.y, passenger.radius + 8 + progress * 18, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.globalAlpha = alpha * 0.85;
+  ctx.fillStyle = TIDELINE_TOKENS.color.gold;
+  for (let index = 0; index < 3; index += 1) {
+    const angle = index * (Math.PI * 2 / 3) + age * 4;
+    const distance = passenger.radius + 10 + progress * 10;
+    ctx.beginPath();
+    ctx.arc(
+      passenger.position.x + Math.cos(angle) * distance,
+      passenger.position.y + Math.sin(angle) * distance,
+      1.6,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -70,9 +168,13 @@ export function renderEffects(
     for (const event of state.events) {
       const age = eventAge(state.elapsed, event.at);
       if (event.type === 'guide' && event.detail) {
-        for (const id of event.detail.split(',').filter(Boolean)) {
+        drawGuideWave(renderContext, state, age);
+        for (const [index, id] of event.detail.split(',').filter(Boolean).entries()) {
           const passenger = findPassenger(state, id);
-          if (passenger) drawGuideEffect(renderContext, passenger, age);
+          if (passenger) {
+            drawGuideBeam(renderContext, state, passenger, age, index);
+            drawGuideEffect(renderContext, passenger, age);
+          }
         }
       } else if (event.type === 'collision') {
         drawCollisionFlash(renderContext, state, age);

@@ -77,8 +77,8 @@ test('微信 Canvas 适配器读取窗口/安全区并同步 DPR，异常时使�
       return { windowWidth: 320, windowHeight: 568, pixelRatio: 1 };
     },
   });
-  assert.equal(bridgeFallback.viewport.width, 375);
-  assert.equal(bridgeFallback.viewport.height, 667);
+  assert.equal(bridgeFallback.viewport.width, 667);
+  assert.equal(bridgeFallback.viewport.height, 375);
   assert.equal(bridgeFallbackCalls, 0);
   assert.throws(
     () => new WxCanvasAdapter({ createCanvas: () => ({ width: 0, height: 0 }) }),
@@ -87,6 +87,15 @@ test('微信 Canvas 适配器读取窗口/安全区并同步 DPR，异常时使�
 
   const fromSafeSize = viewportFromWxInfo({ windowWidth: 300, windowHeight: 600, safeArea: { left: 10, top: 20, width: 280, height: 560 } });
   assert.deepEqual(fromSafeSize.insets, { left: 10, top: 20, right: 10, bottom: 20 });
+});
+
+test('微信 Canvas 适配器暴露可选图片工厂', () => {
+  const image = {};
+  const adapter = new WxCanvasAdapter({
+    createCanvas: () => makeCanvas(),
+    createImage: () => image,
+  });
+  assert.equal(adapter.imageFactory?.(), image);
 });
 
 test('微信触摸适配器支持多指摇杆、按钮命中和滑出/取消释放', () => {

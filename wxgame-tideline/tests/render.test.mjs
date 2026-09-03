@@ -57,6 +57,7 @@ class MockContext {
   fillRect(x, y, width, height) { this.record('fillRect', x, y, width, height); }
   strokeRect(x, y, width, height) { this.record('strokeRect', x, y, width, height); }
   clearRect(x, y, width, height) { this.record('clearRect', x, y, width, height); }
+  drawImage(...args) { this.record('drawImage', ...args); }
   fillText(text, x, y, maxWidth) { this.record('fillText', text, x, y, maxWidth); }
   strokeText(text, x, y, maxWidth) { this.record('strokeText', text, x, y, maxWidth); }
   measureText(text) { return { width: text.length * 8 }; }
@@ -103,21 +104,68 @@ test('viewport layout keeps logical coordinates reversible and configures DPR', 
   assert.deepEqual(canvasContext.operations.at(-1), ['setTransform', 3, 0, 0, 3, 0, 0]);
 });
 
-test('landscape layout rotates the world while keeping geometry reversible', () => {
+test('landscape layout keeps the train above the platform and geometry reversible', () => {
   const metrics = createViewportMetrics(667, 375, 1);
   const layout = createRenderLayout(metrics, { x: 0, y: -160, width: 320, height: 728 });
   assert.equal(layout.orientation, 'landscape');
-  assert.deepEqual(layout.displayWorldBounds, { x: -160, y: -320, width: 728, height: 320 });
+  assert.deepEqual(layout.displayWorldBounds, { x: 0, y: -160, width: 320, height: 728 });
+  assert.ok(layout.worldScaleX > layout.worldScaleY);
+  assert.ok(layout.worldRect.x >= metrics.contentRect.x);
+  assert.ok(layout.worldRect.y >= metrics.contentRect.y);
+  assert.ok(layout.worldRect.x + layout.worldRect.width <= metrics.contentRect.x + metrics.contentRect.width);
+  assert.ok(layout.worldRect.y + layout.worldRect.height <= metrics.contentRect.y + metrics.contentRect.height);
+  assert.ok(layout.worldRect.y < metrics.contentRect.y + 40, 'landscape world should use the freed top area');
+  assert.ok(layout.worldRect.height > 300, 'landscape carriage/platform stage should be taller');
+  assert.ok(layout.hudRect.width < metrics.contentRect.width * 0.3, 'landscape HUD should be a floating side card');
+  assert.ok(layout.pauseButtonRect.x >= layout.hudRect.x);
+  assert.ok(layout.pauseButtonRect.y >= layout.hudRect.y);
+  assert.ok(layout.pauseButtonRect.x + layout.pauseButtonRect.width <= layout.hudRect.x + layout.hudRect.width);
 
   const context = new RenderContext(new MockContext(), metrics, layout.worldBounds);
   const trainPoint = context.worldToScreen({ x: 160, y: -80 });
   const platformPoint = context.worldToScreen({ x: 160, y: 300 });
-  assert.ok(trainPoint.x < platformPoint.x, 'train should appear to the left of the platform');
+  assert.ok(trainPoint.y < platformPoint.y, 'train should appear above the platform');
+  const trainTop = context.worldToScreen({ x: 160, y: -160 });
+  const platformBoundary = context.worldToScreen({ x: 160, y: 0 });
+  assert.ok(platformBoundary.y - trainTop.y > 70, 'landscape carriage should have a larger visual height');
 
   const worldPoint = { x: 123.5, y: 42.25 };
   const roundTrip = context.screenToWorld(context.worldToScreen(worldPoint));
   assertClose(roundTrip.x, worldPoint.x);
   assertClose(roundTrip.y, worldPoint.y);
+});
+
+test('landscape actors use a compact visual scale that fits the carriage', () => {
+  const level = MVP_LEVELS[0];
+  const simulation = new GameSimulation(level, 2026);
+  const state = simulation.getState();
+  const passenger = state.passengers[0];
+  assert.ok(passenger);
+  passenger.kind = 'regular';
+  passenger.role = 'waiting';
+  passenger.position = { x: 160, y: 180 };
+  for (const other of state.passengers.slice(1)) other.role = 'exited';
+
+  const landscapeContext = new MockContext({ nativeRoundRect: false });
+  const landscapeCanvas = makeCanvas(landscapeContext);
+  const landscapeRenderer = GameRenderer.fromCanvas(landscapeCanvas, 667, 375, 1, {}, level);
+  landscapeRenderer.render(state, level, { showControls: false });
+
+  const uniformLandscapeScales = landscapeContext.operations
+    .filter(([name, x, y]) => name === 'scale' && Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) < 1e-8)
+    .map(([, x]) => x)
+    .filter((value) => value > 0 && value < 1);
+  assert.ok(uniformLandscapeScales.some((value) => value < 0.7), 'the passenger body should be reduced in landscape');
+
+  const portraitContext = new MockContext({ nativeRoundRect: false });
+  const portraitCanvas = makeCanvas(portraitContext);
+  const portraitRenderer = GameRenderer.fromCanvas(portraitCanvas, 375, 667, 1, {}, level);
+  portraitRenderer.render(state, level, { showControls: false });
+  const uniformPortraitScales = portraitContext.operations
+    .filter(([name, x, y]) => name === 'scale' && Number.isFinite(x) && Number.isFinite(y) && Math.abs(x - y) < 1e-8)
+    .map(([, x]) => x)
+    .filter((value) => value > 0 && value < 1);
+  assert.ok(!uniformPortraitScales.some((value) => value < 0.7), 'portrait actor sizing should remain unchanged');
 });
 
 test('landscape route cards use columns so all stations fit the wide screen', () => {
@@ -129,17 +177,25 @@ test('landscape route cards use columns so all stations fit the wide screen', ()
   assert.equal(second.y, third.y);
   assert.ok(first.x < second.x && second.x < third.x);
   assert.ok(third.x + third.width <= viewport.contentRect.x + viewport.contentRect.width);
+
+  const narrowLandscape = createViewportMetrics(480, 320);
+  for (let index = 0; index < 3; index += 1) {
+    const card = routeCardRect(narrowLandscape, index);
+    assert.ok(card.x >= narrowLandscape.contentRect.x);
+    assert.ok(card.y >= narrowLandscape.contentRect.y);
+    assert.ok(card.x + card.width <= narrowLandscape.contentRect.x + narrowLandscape.contentRect.width);
+    assert.ok(card.y + card.height <= narrowLandscape.contentRect.y + narrowLandscape.contentRect.height);
+  }
 });
 
-test('GameRenderer draws the horizontal world and upright actor counter-rotation', () => {
+test('GameRenderer draws the horizontal world without rotating the canvas', () => {
   const context = new MockContext({ nativeRoundRect: false });
   const canvas = makeCanvas(context);
   const level = MVP_LEVELS[0];
   const renderer = GameRenderer.fromCanvas(canvas, 667, 375, 1, {}, level);
   renderer.render(new GameSimulation(level, 23).snapshot(), level, { showControls: true });
   assert.equal(renderer.context.layout.orientation, 'landscape');
-  assert.ok(context.operations.some(([name, angle]) => name === 'rotate' && angle < 0));
-  assert.ok(context.operations.some(([name, angle]) => name === 'rotate' && angle > 0));
+  assert.equal(context.operations.some(([name]) => name === 'rotate'), false);
 });
 
 test('roundRect uses native API when available and a quadratic fallback otherwise', () => {
@@ -288,6 +344,47 @@ test('M8 visual sample emits depth and character primitives', () => {
   assert.equal(names.includes('rotate'), false);
   assert.ok(names.filter((name) => name === 'roundRect' || name === 'quadraticCurveTo').length >= 8);
   assert.ok(names.filter((name) => name === 'lineTo').length >= 20);
+});
+
+test('player Sprite loads asynchronously, switches frames, and keeps geometry fallback', () => {
+  const context = new MockContext({ nativeRoundRect: false });
+  const canvas = makeCanvas(context);
+  const image = {
+    src: '',
+    width: 0,
+    height: 0,
+    complete: false,
+    onload: undefined,
+    onerror: undefined,
+  };
+  const level = MVP_LEVELS[0];
+  const simulation = new GameSimulation(level, 8080);
+  const state = simulation.getState();
+  state.elapsed = 1;
+  state.player.velocity = { x: state.player.speed, y: 0 };
+  state.events.push({ type: 'guide', at: 1, detail: state.passengers[0]?.id });
+  const renderer = GameRenderer.fromCanvas(canvas, 667, 375, 1, {}, level, {
+    imageFactory: () => image,
+  });
+  assert.equal(image.src, 'assets/generated/tideline-player-sprite.png');
+  image.onload?.();
+  renderer.render(state, level, { showControls: false });
+  const firstSprite = context.operations.find(([name]) => name === 'drawImage');
+  assert.ok(firstSprite);
+  assert.equal(firstSprite[1], image);
+  assert.equal(firstSprite[2], 192, 'guide action should use the waving frame');
+
+  state.events = [];
+  state.elapsed = 1.2;
+  renderer.render(state, level, { showControls: false });
+  const secondSprite = context.operations.filter(([name]) => name === 'drawImage').at(-1);
+  assert.ok(secondSprite);
+  assert.notEqual(secondSprite[2], firstSprite[2], 'walking should advance the sprite frame');
+
+  image.onerror?.();
+  renderer.render(state, level, { showControls: false });
+  const spriteCallsAfterFailure = context.operations.filter(([name]) => name === 'drawImage').length;
+  assert.equal(spriteCallsAfterFailure, 2, 'failed image decoding should use geometry fallback');
 });
 
 test('passenger body is translated to its world position', () => {
