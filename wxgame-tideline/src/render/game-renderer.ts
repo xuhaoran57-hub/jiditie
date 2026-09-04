@@ -76,7 +76,7 @@ export class GameRenderer {
     if (!context) throw new Error('a 2d canvas context is required');
     const viewport = createViewportMetrics(width, height, dpr, insets);
     configureCanvas(canvas, context, viewport);
-    const fallbackWorld: Rect = level ? worldBoundsFor(level) : { x: 0, y: -160, width: 320, height: 728 };
+    const fallbackWorld: Rect = level ? worldBoundsFor(level) : { x: 0, y: -240, width: 320, height: 808 };
     return new GameRenderer(new RenderContext(context, viewport, fallbackWorld), canvas, assets);
   }
 

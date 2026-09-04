@@ -390,7 +390,9 @@ export function updatePassengers(
       const doorState = doorStateById(context.doorStates, door.id);
       // 下车流只能在车门真正打开后开始；在进站、停靠和关门前的阶段，
       // 乘客保持在车厢内部，避免一开局就出现在站台等候区。
-      if (!context.alightingOpen || !doorState?.open) {
+      // blocked 门虽然可能仍带有 open 状态，也不能让乘客穿过；渲染层同样
+      // 会隐藏这扇门内的角色，规则层和画面保持一致。
+      if (!context.alightingOpen || !doorState?.open || doorState.blocked) {
         passenger.velocity = vec();
         continue;
       }

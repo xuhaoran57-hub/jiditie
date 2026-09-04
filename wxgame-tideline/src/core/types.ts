@@ -28,6 +28,11 @@ export const PASSENGER_KINDS = [
 
 export type PassengerKind = (typeof PASSENGER_KINDS)[number];
 
+/** 关卡阶段对应的车厢外观主题。渲染层只依赖这个稳定的语义值。 */
+export const CARRIAGE_THEMES = ['pearl', 'yellow', 'seafoam'] as const;
+
+export type CarriageTheme = (typeof CARRIAGE_THEMES)[number];
+
 /**
  * M5 内容事件只描述规则参数，不携带任何 Canvas/微信对象。
  * 事件按关卡配置的数据驱动，便于后续扩展而不改状态机接口。
@@ -137,6 +142,8 @@ export interface LevelConfig {
   name: string;
   stationName: string;
   description: string;
+  /** 车厢配色主题；自定义关卡未填写时由渲染层回退到 seafoam。 */
+  carriageTheme?: CarriageTheme;
   phaseDurations: PhaseDurations;
   boardingDuration: number;
   warningThreshold: number;

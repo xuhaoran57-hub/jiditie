@@ -160,6 +160,34 @@ test('下车乘客在车门打开前留在车厢内部，开门后才走出', ()
   assert.ok(passenger.position.y > beforeExit);
 });
 
+test('阻塞车门不会让车内下车乘客提前移动', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 1;
+  level.passenger.alightingCount = 1;
+  const passenger = createPassengers(level, new SeededRandom(29))[0];
+  assert.ok(passenger);
+  const door = level.doors[0];
+  const doorStates = [{ id: door.id, occupancy: 0, open: true, blocked: true }];
+  const context = {
+    dt: 1 / 30,
+    now: 0,
+    platformBounds: level.platformBounds,
+    trainBounds: level.trainBounds,
+    doors: level.doors,
+    doorStates,
+    carriageCapacity: level.carriageCapacity,
+    boardingOpen: false,
+    alightingOpen: true,
+  };
+  const before = { ...passenger.position };
+  updatePassengers([passenger], context);
+  assert.deepEqual(passenger.position, before);
+
+  doorStates[0].blocked = false;
+  updatePassengers([passenger], context);
+  assert.ok(passenger.position.y > before.y);
+});
+
 test('容量达到上限时，后续乘客不能继续无条件进入', () => {
   const level = cloneLevelConfig(MVP_LEVELS[0]);
   level.passenger.count = 3;

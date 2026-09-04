@@ -1,38 +1,101 @@
-import type { DoorConfig, GameState, LevelConfig, Rect, Vec2 } from '../core/types.ts';
+import type { CarriageTheme, DoorConfig, GameState, LevelConfig, Rect, Vec2 } from '../core/types.ts';
 import { clamp } from '../core/vector.ts';
 import { fillRoundRect, RenderContext } from './context.ts';
 import { canvasFont, TIDELINE_TOKENS } from './design-tokens.ts';
 
 /**
- * M8-A 视觉样板：潮汐线车辆采用“深海外壳 + 潮汐灯带 + 暖色站台”的独立语言。
+ * M8-A 视觉样板：潮汐线车辆采用可切换的主题外壳 + 潮汐灯带 + 浅灰蓝站台。
  * 这里不依赖图片、渐变或 clip，保证微信开发者工具和低版本 Canvas 都能绘制。
  */
 export const STATION_COLORS = {
   sky: TIDELINE_TOKENS.color.sky,
   skyBand: '#4b82a1',
   platform: TIDELINE_TOKENS.color.platform,
-  platformShadow: '#375d77',
+  platformShadow: TIDELINE_TOKENS.color.platformShadow,
   platformEdge: TIDELINE_TOKENS.color.platformEdge,
   tactile: '#f4cb72',
   tile: TIDELINE_TOKENS.color.tile,
-  tileLight: '#8db5c1',
+  tileLight: TIDELINE_TOKENS.color.tileLight,
+  // 默认主题为后期站点的青绿色车厢；其他关卡通过 CARRIAGE_COLORS 覆盖这些字段。
   train: TIDELINE_TOKENS.color.train,
-  trainShell: '#3b7890',
-  trainShellLight: '#5f9bad',
-  trainTrim: '#72f1d8',
+  trainShell: '#2d6b6a',
+  trainShellLight: '#3f8f86',
+  trainTrim: '#84dfc3',
   trainStripe: TIDELINE_TOKENS.color.trainStripe,
   window: TIDELINE_TOKENS.color.window,
-  windowShade: '#6ca7bc',
+  windowShade: '#4b9290',
   windowGlint: '#f0ffff',
   interior: '#16364b',
   interiorFloor: '#4f8991',
-  seat: '#77afb0',
+  seat: '#77b8a8',
   metal: '#d1eff0',
   doorOpen: TIDELINE_TOKENS.color.gold,
   doorClosed: TIDELINE_TOKENS.color.warning,
   safeZone: TIDELINE_TOKENS.color.safe,
   text: TIDELINE_TOKENS.color.text,
 } as const;
+
+export type StationColors = typeof STATION_COLORS;
+
+/**
+ * 车厢主题只覆盖车体相关颜色，站台材质、状态色和交互语义保持一致。
+ * 这样三种外观可以共用同一套平面几何结构，也不会让颜色承担状态提示。
+ */
+export const CARRIAGE_COLORS = {
+  pearl: {
+    train: '#afc0c9',
+    trainShell: '#e7edf0',
+    trainShellLight: '#ffffff',
+    trainTrim: '#78cfc2',
+    trainStripe: '#50b9af',
+    window: '#d7f0f1',
+    windowShade: '#7094a3',
+    windowGlint: '#ffffff',
+    seat: '#89b9b5',
+    metal: '#f8ffff',
+  },
+  yellow: {
+    train: '#c5a661',
+    trainShell: '#f1dda0',
+    trainShellLight: '#fff0c2',
+    trainTrim: '#79cdb8',
+    trainStripe: '#56b9a5',
+    window: '#dff4f1',
+    windowShade: '#8da39e',
+    windowGlint: '#ffffff',
+    seat: '#b9a26b',
+    metal: '#fff9df',
+  },
+  seafoam: {
+    train: '#1e5057',
+    trainShell: '#2d6b6a',
+    trainShellLight: '#3f8f86',
+    trainTrim: '#84dfc3',
+    trainStripe: '#5bc6aa',
+    window: '#b8edf0',
+    windowShade: '#4b9290',
+    windowGlint: '#f0ffff',
+    seat: '#77b8a8',
+    metal: '#d1eff0',
+  },
+} as const satisfies Record<CarriageTheme, Partial<Record<keyof StationColors, string>>>;
+
+/** 未配置主题的自定义关卡沿用后期青绿色车厢，保证旧关卡配置继续可运行。 */
+export const DEFAULT_CARRIAGE_THEME: CarriageTheme = 'seafoam';
+
+export function stationColorsFor(theme?: CarriageTheme): StationColors {
+  const overrides = theme ? CARRIAGE_COLORS[theme] : undefined;
+  return {
+    ...STATION_COLORS,
+    ...(overrides ?? CARRIAGE_COLORS[DEFAULT_CARRIAGE_THEME]),
+  } as StationColors;
+}
+
+const BASE_CARRIAGE_HEIGHT = 160;
+
+function carriageVerticalScale(height: number): number {
+  return Math.max(0.5, Math.abs(height) / BASE_CARRIAGE_HEIGHT);
+}
 
 function fillPolygon(ctx: RenderContext['ctx'], points: readonly Vec2[], color: string): void {
   if (points.length < 3) return;
@@ -96,16 +159,20 @@ function drawWorldText(
   ctx.restore();
 }
 
-function drawBackdrop(context: RenderContext, world: Rect): void {
+function drawBackdrop(
+  context: RenderContext,
+  world: Rect,
+  colors: StationColors = STATION_COLORS,
+): void {
   const { ctx } = context;
-  ctx.fillStyle = STATION_COLORS.sky;
+  ctx.fillStyle = colors.sky;
   ctx.fillRect(world.x, world.y, world.width, world.height);
 
   // 不同深度的横向色带让狭长画面不再像一张纯色底图。
   for (let y = world.y; y < world.y + world.height; y += 24) {
     const band = Math.floor((y - world.y) / 24) % 2 === 0;
     ctx.globalAlpha = band ? 0.18 : 0.08;
-    ctx.fillStyle = STATION_COLORS.skyBand;
+    ctx.fillStyle = colors.skyBand;
     ctx.fillRect(world.x, y, world.width, 12);
   }
   ctx.globalAlpha = 1;
@@ -113,7 +180,7 @@ function drawBackdrop(context: RenderContext, world: Rect): void {
   // 侧边的潮汐线标记是抽象装饰，不对应现实站点标志。
   ctx.save();
   ctx.globalAlpha = 0.22;
-  ctx.strokeStyle = STATION_COLORS.trainTrim;
+  ctx.strokeStyle = colors.trainTrim;
   ctx.lineWidth = 2;
   for (let side = 0; side < 2; side += 1) {
     const x = side === 0 ? world.x + 7 : world.x + world.width - 7;
@@ -127,9 +194,16 @@ function drawBackdrop(context: RenderContext, world: Rect): void {
   ctx.restore();
 }
 
-function drawWindow(ctx: RenderContext['ctx'], x: number, y: number, width: number, height: number): void {
-  fillRoundRect(ctx, x, y, width, height, 7, STATION_COLORS.windowShade);
-  fillRoundRect(ctx, x + 3, y + 3, width - 6, height - 6, 5, STATION_COLORS.window);
+function drawWindow(
+  ctx: RenderContext['ctx'],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  colors: StationColors = STATION_COLORS,
+): void {
+  fillRoundRect(ctx, x, y, width, height, 7, colors.windowShade);
+  fillRoundRect(ctx, x + 3, y + 3, width - 6, height - 6, 5, colors.window);
   ctx.save();
   ctx.globalAlpha = 0.6;
   fillPolygon(ctx, [
@@ -137,7 +211,7 @@ function drawWindow(ctx: RenderContext['ctx'], x: number, y: number, width: numb
     { x: x + width * 0.52, y: y + 4 },
     { x: x + width * 0.69, y: y + 4 },
     { x: x + width * 0.18, y: y + height - 5 },
-  ], STATION_COLORS.windowGlint);
+  ], colors.windowGlint);
   ctx.restore();
   ctx.save();
   ctx.globalAlpha = 0.55;
@@ -150,114 +224,125 @@ function drawWindow(ctx: RenderContext['ctx'], x: number, y: number, width: numb
   ctx.restore();
 }
 
-function drawTrain(context: RenderContext, train: Rect): void {
+function drawTrain(
+  context: RenderContext,
+  train: Rect,
+  colors: StationColors = STATION_COLORS,
+): void {
   const { ctx } = context;
   const x = train.x;
   const y = train.y;
   const width = train.width;
   const height = train.height;
+  const verticalScale = carriageVerticalScale(height);
+  const yAt = (offset: number): number => y + offset * verticalScale;
+  const h = (size: number): number => size * verticalScale;
 
   // 车体投影、圆角外壳和顶部压边，先建立体积再画细节。
   ctx.save();
   ctx.globalAlpha = 0.52;
-  fillRoundRect(ctx, x - 6, y + 6, width + 12, height + 14, 17, '#0e2434');
+  fillRoundRect(ctx, x - 6, yAt(6), width + 12, height + h(14), 17, '#0e2434');
   ctx.restore();
-  fillRoundRect(ctx, x - 2, y - 3, width + 4, height + 8, 15, STATION_COLORS.train);
-  fillRoundRect(ctx, x + 5, y + 5, width - 10, height - 12, 10, STATION_COLORS.trainShell);
+  fillRoundRect(ctx, x - 2, yAt(-3), width + 4, height + h(8), 15, colors.train);
+  fillRoundRect(ctx, x + 5, yAt(5), width - 10, height - h(12), 10, colors.trainShell);
 
   // 顶部车顶与两道金属反光。
   fillPolygon(ctx, [
-    { x: x + 12, y: y + 5 },
-    { x: x + width - 12, y: y + 5 },
-    { x: x + width - 20, y: y + 17 },
-    { x: x + 20, y: y + 17 },
-  ], STATION_COLORS.trainShellLight);
-  ctx.fillStyle = STATION_COLORS.metal;
+    { x: x + 12, y: yAt(5) },
+    { x: x + width - 12, y: yAt(5) },
+    { x: x + width - 20, y: yAt(17) },
+    { x: x + 20, y: yAt(17) },
+  ], colors.trainShellLight);
+  ctx.fillStyle = colors.metal;
   ctx.globalAlpha = 0.34;
-  ctx.fillRect(x + 20, y + 12, width - 40, 2);
-  ctx.fillRect(x + 32, y + 16, width - 64, 1);
+  ctx.fillRect(x + 20, yAt(12), width - 40, h(2));
+  ctx.fillRect(x + 32, yAt(16), width - 64, h(1));
   ctx.globalAlpha = 1;
 
   // 连续窗带：每块窗有内框、反光和竖向车体骨架。
-  const windowY = y + 26;
-  const windowHeight = 44;
+  const windowY = yAt(26);
+  const windowHeight = h(44);
   for (let windowX = x + 14; windowX < x + width - 20; windowX += 47) {
-    drawWindow(ctx, windowX, windowY, Math.min(36, x + width - 14 - windowX), windowHeight);
+    drawWindow(ctx, windowX, windowY, Math.min(36, x + width - 14 - windowX), windowHeight, colors);
   }
   ctx.save();
   ctx.globalAlpha = 0.35;
-  ctx.fillStyle = STATION_COLORS.trainShellLight;
+  ctx.fillStyle = colors.trainShellLight;
   for (let ribX = x + 9; ribX < x + width; ribX += 47) {
-    ctx.fillRect(ribX, y + 22, 3, height - 48);
+    ctx.fillRect(ribX, yAt(22), 3, height - h(48));
   }
   ctx.restore();
 
   // 窗下的抽象潮汐灯带和车厢下裙边。
   ctx.fillStyle = '#24556b';
-  ctx.fillRect(x + 8, y + 76, width - 16, 48);
-  ctx.fillStyle = STATION_COLORS.trainStripe;
-  ctx.fillRect(x + 9, y + 79, width - 18, 6);
+  ctx.fillRect(x + 8, yAt(76), width - 16, h(48));
+  ctx.fillStyle = colors.trainStripe;
+  ctx.fillRect(x + 9, yAt(79), width - 18, h(6));
   ctx.save();
   ctx.globalAlpha = 0.52;
   ctx.fillStyle = '#b9fff1';
-  ctx.fillRect(x + 14, y + 80, width - 28, 1);
+  ctx.fillRect(x + 14, yAt(80), width - 28, h(1));
   ctx.restore();
 
   // 内饰地板和座椅轮廓会从开启的门洞里露出。
-  ctx.fillStyle = STATION_COLORS.interior;
-  ctx.fillRect(x + 10, y + 82, width - 20, Math.max(0, height - 94));
+  ctx.fillStyle = colors.interior;
+  ctx.fillRect(x + 10, yAt(82), width - 20, Math.max(0, height - h(94)));
   ctx.fillStyle = '#2d6678';
-  ctx.fillRect(x + 13, y + 87, width - 26, 7);
-  ctx.fillStyle = STATION_COLORS.interiorFloor;
-  ctx.fillRect(x + 13, y + 94, width - 26, Math.max(0, height - 108));
+  ctx.fillRect(x + 13, yAt(87), width - 26, h(7));
+  ctx.fillStyle = colors.interiorFloor;
+  ctx.fillRect(x + 13, yAt(94), width - 26, Math.max(0, height - h(108)));
   ctx.fillStyle = '#b8fff0';
   ctx.globalAlpha = 0.72;
-  ctx.fillRect(x + 20, y + 89, width - 40, 2);
+  ctx.fillRect(x + 20, yAt(89), width - 40, h(2));
   ctx.globalAlpha = 1;
   for (let lightX = x + 34; lightX < x + width - 24; lightX += 54) {
-    fillRoundRect(ctx, lightX, y + 86, 18, 4, 2, '#d8fff3');
+    fillRoundRect(ctx, lightX, yAt(86), 18, h(4), 2, '#d8fff3');
   }
   for (let seatX = x + 20; seatX < x + width - 24; seatX += 42) {
-    fillRoundRect(ctx, seatX, y + 101, 22, 13, 4, STATION_COLORS.seat);
+    fillRoundRect(ctx, seatX, yAt(101), 22, h(13), 4, colors.seat);
     ctx.fillStyle = '#d8f6ee';
     ctx.globalAlpha = 0.62;
-    ctx.fillRect(seatX + 4, y + 115, 14, 2);
+    ctx.fillRect(seatX + 4, yAt(115), 14, h(2));
     ctx.globalAlpha = 1;
   }
   for (let floorX = x + 18; floorX < x + width - 18; floorX += 22) {
     strokeLine(ctx, [
-      { x: floorX, y: y + 121 },
-      { x: floorX + (floorX - (x + width / 2)) * 0.1, y: y + height - 4 },
+      { x: floorX, y: yAt(121) },
+      { x: floorX + (floorX - (x + width / 2)) * 0.1, y: y + height - h(4) },
     ], '#72afb0', 1);
   }
 
   // 车厢底部护板与门槛阴影。
   ctx.fillStyle = '#173348';
-  ctx.fillRect(x + 6, y + height - 21, width - 12, 17);
-  ctx.fillStyle = STATION_COLORS.trainShellLight;
-  ctx.fillRect(x + 12, y + height - 18, width - 24, 4);
-  ctx.fillStyle = STATION_COLORS.trainTrim;
+  ctx.fillRect(x + 6, y + height - h(21), width - 12, h(17));
+  ctx.fillStyle = colors.trainShellLight;
+  ctx.fillRect(x + 12, y + height - h(18), width - 24, h(4));
+  ctx.fillStyle = colors.trainTrim;
   ctx.globalAlpha = 0.46;
-  ctx.fillRect(x + 20, y + height - 12, width - 40, 2);
+  ctx.fillRect(x + 20, y + height - h(12), width - 40, h(2));
   ctx.globalAlpha = 1;
 }
 
-function drawPlatform(context: RenderContext, platform: Rect): void {
+function drawPlatform(
+  context: RenderContext,
+  platform: Rect,
+  colors: StationColors = STATION_COLORS,
+): void {
   const { ctx } = context;
-  ctx.fillStyle = STATION_COLORS.platformShadow;
+  ctx.fillStyle = colors.platformShadow;
   ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
-  ctx.fillStyle = STATION_COLORS.platform;
+  ctx.fillStyle = colors.platform;
   ctx.fillRect(platform.x + 7, platform.y + 5, platform.width - 14, platform.height - 5);
 
   // 大块地砖和错位缝，形成可感知的地面尺度。
   for (let y = platform.y + 26; y < platform.y + platform.height; y += 34) {
-    ctx.fillStyle = STATION_COLORS.tile;
+    ctx.fillStyle = colors.tile;
     ctx.globalAlpha = 0.58;
     ctx.fillRect(platform.x + 8, y, platform.width - 16, 1);
     ctx.globalAlpha = 1;
     const offset = Math.floor((y - platform.y) / 34) % 2 === 0 ? 18 : 38;
     for (let x = platform.x + offset; x < platform.x + platform.width - 8; x += 40) {
-      ctx.fillStyle = STATION_COLORS.tileLight;
+      ctx.fillStyle = colors.tileLight;
       ctx.globalAlpha = 0.46;
       ctx.fillRect(x, y + 1, 1, 33);
       ctx.globalAlpha = 1;
@@ -275,7 +360,7 @@ function drawPlatform(context: RenderContext, platform: Rect): void {
   ctx.globalAlpha = 1;
 
   // 车门侧的盲道点阵与金属边缘。
-  ctx.fillStyle = STATION_COLORS.tactile;
+  ctx.fillStyle = colors.tactile;
   ctx.globalAlpha = 0.92;
   ctx.fillRect(platform.x + 8, platform.y + 9, platform.width - 16, 9);
   ctx.globalAlpha = 1;
@@ -285,7 +370,7 @@ function drawPlatform(context: RenderContext, platform: Rect): void {
     ctx.fillStyle = '#f4d58a';
     ctx.fill();
   }
-  ctx.fillStyle = STATION_COLORS.platformEdge;
+  ctx.fillStyle = colors.platformEdge;
   ctx.fillRect(platform.x, platform.y, platform.width, 5);
   ctx.fillStyle = '#d6f2ef';
   ctx.globalAlpha = 0.65;
@@ -294,10 +379,10 @@ function drawPlatform(context: RenderContext, platform: Rect): void {
 
   // 贯穿站台的潮汐导向线，强化“路线”而不是现实地铁品牌。
   // 使用短的非定向装饰块保留线路识别度，不绘制容易被误解为乘客路径的长线。
-  ctx.fillStyle = STATION_COLORS.trainTrim;
+  ctx.fillStyle = colors.trainTrim;
   ctx.globalAlpha = 0.5;
   for (let x = platform.x + 28; x < platform.x + platform.width - 28; x += 56) {
-    fillRoundRect(ctx, x, platform.y + platform.height - 28, 26, 4, 2, STATION_COLORS.trainTrim);
+    fillRoundRect(ctx, x, platform.y + platform.height - 28, 26, 4, 2, colors.trainTrim);
   }
   ctx.globalAlpha = 1;
 }
@@ -310,11 +395,12 @@ function drawDoor(
   selected: boolean,
   blocked = false,
   now = 0,
+  colors: StationColors = STATION_COLORS,
 ): void {
   const { ctx } = context;
   const half = door.width / 2;
   const left = door.center.x - half;
-  const top = train.y + 52;
+  const top = train.y + 52 * carriageVerticalScale(train.height);
   const bottom = door.center.y + 5;
   const height = bottom - top;
   const frameColor = blocked
@@ -322,8 +408,8 @@ function drawDoor(
     : selected
       ? '#f7ffff'
       : open
-        ? STATION_COLORS.doorOpen
-        : STATION_COLORS.doorClosed;
+        ? colors.doorOpen
+        : colors.doorClosed;
 
   // 门洞内的黑位、地板和顶灯先画出来，开门时形成真正的空间深度。
   ctx.save();
@@ -383,7 +469,7 @@ function drawDoor(
   ctx.globalAlpha = 0.7;
   ctx.fillRect(left + 4, bottom - 2, door.width - 8, 4);
   ctx.globalAlpha = 1;
-  ctx.fillStyle = selected ? STATION_COLORS.trainTrim : frameColor;
+  ctx.fillStyle = selected ? colors.trainTrim : frameColor;
   ctx.fillRect(left + 8, top + 4, door.width - 16, 3);
   ctx.restore();
 
@@ -391,7 +477,7 @@ function drawDoor(
   if (selected) {
     ctx.save();
     ctx.globalAlpha = 0.28 + (Math.sin(now * 6 + door.center.x * 0.08) + 1) * 0.04;
-    ctx.strokeStyle = STATION_COLORS.trainTrim;
+    ctx.strokeStyle = colors.trainTrim;
     ctx.lineWidth = 5;
     ctx.strokeRect(left - 4, top - 4, door.width + 8, height + 8);
     ctx.restore();
@@ -400,10 +486,10 @@ function drawDoor(
   // 站台侧安全区采用低饱和底色，仍保留触控识别度。
   ctx.save();
   ctx.globalAlpha = 0.13;
-  ctx.fillStyle = STATION_COLORS.safeZone;
+  ctx.fillStyle = colors.safeZone;
   ctx.fillRect(door.safeZone.x, door.safeZone.y, door.safeZone.width, door.safeZone.height);
   ctx.globalAlpha = 0.42;
-  ctx.strokeStyle = STATION_COLORS.safeZone;
+  ctx.strokeStyle = colors.safeZone;
   ctx.lineWidth = 1;
   ctx.strokeRect(door.safeZone.x, door.safeZone.y, door.safeZone.width, door.safeZone.height);
   ctx.restore();
@@ -473,11 +559,12 @@ export function renderStation(
   state: GameState,
 ): void {
   const { ctx } = renderContext;
+  const colors = stationColorsFor(level.carriageTheme);
   renderContext.withWorld(() => {
     const world = renderContext.layout.worldBounds;
-    drawBackdrop(renderContext, world);
-    drawTrain(renderContext, level.trainBounds);
-    drawPlatform(renderContext, level.platformBounds);
+    drawBackdrop(renderContext, world, colors);
+    drawTrain(renderContext, level.trainBounds, colors);
+    drawPlatform(renderContext, level.platformBounds, colors);
 
     for (const door of level.doors) {
       const runtime = state.doors.find((item) => item.id === door.id);
@@ -489,6 +576,7 @@ export function renderStation(
         state.player.selectedDoorId === door.id,
         runtime?.blocked ?? false,
         state.elapsed,
+        colors,
       );
       if (runtime && runtime.occupancy > 0) {
         const occupancyRatio = clamp(runtime.occupancy / Math.max(1, level.carriageCapacity), 0, 1);
@@ -496,7 +584,7 @@ export function renderStation(
         const barY = door.safeZone.y + door.safeZone.height + 5;
         ctx.fillStyle = '#23465d';
         ctx.fillRect(barX, barY, door.width, 4);
-        ctx.fillStyle = occupancyRatio > 0.85 ? '#ed7b83' : STATION_COLORS.safeZone;
+        ctx.fillStyle = occupancyRatio > 0.85 ? '#ed7b83' : colors.safeZone;
         ctx.fillRect(barX, barY, door.width * occupancyRatio, 4);
       }
     }

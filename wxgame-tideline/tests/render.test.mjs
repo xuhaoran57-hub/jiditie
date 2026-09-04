@@ -2,18 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { GameSimulation, MVP_LEVELS } from '../src/core/index.ts';
+import { CARRIAGE_THEMES, GameSimulation, MVP_LEVELS } from '../src/core/index.ts';
 import { DebugInputController, FixedTimestepLoop } from '../src/platform/debug/index.ts';
 import {
   GameRenderer,
   RenderContext,
   configureCanvas,
+  CARRIAGE_COLORS,
   createRenderLayout,
   createViewportMetrics,
+  DEFAULT_CARRIAGE_THEME,
   fillRoundRect,
+  NPC_VISUAL_PROFILES,
   routeCardRect,
+  renderActors,
   renderGameFrame,
   roundRectPath,
+  STATION_COLORS,
+  stationColorsFor,
 } from '../src/render/index.ts';
 
 class MockContext {
@@ -198,6 +204,72 @@ test('GameRenderer draws the horizontal world without rotating the canvas', () =
   assert.equal(context.operations.some(([name]) => name === 'rotate'), false);
 });
 
+test('MVP stations progress through the three carriage themes', () => {
+  assert.deepEqual(CARRIAGE_THEMES, ['pearl', 'yellow', 'seafoam']);
+  assert.deepEqual(MVP_LEVELS.map((level) => level.carriageTheme), ['pearl', 'yellow', 'seafoam']);
+  assert.deepEqual(MVP_LEVELS.map((level) => level.doors.length), [1, 2, 2]);
+});
+
+test('carriage palettes stay distinct and legacy levels fall back safely', () => {
+  const palettes = CARRIAGE_THEMES.map((theme) => stationColorsFor(theme));
+  assert.equal(new Set(palettes.map((palette) => palette.trainShell)).size, 3);
+  assert.equal(new Set(palettes.map((palette) => palette.trainStripe)).size, 3);
+  assert.equal(stationColorsFor().trainShell, stationColorsFor(DEFAULT_CARRIAGE_THEME).trainShell);
+  assert.equal(STATION_COLORS.trainShell, stationColorsFor(DEFAULT_CARRIAGE_THEME).trainShell);
+  assert.equal(stationColorsFor().platform, '#9aafbd');
+  assert.equal(stationColorsFor().platformEdge, '#c4d2d9');
+  assert.equal(CARRIAGE_COLORS.pearl.trainShell, '#e7edf0');
+  assert.equal(CARRIAGE_COLORS.yellow.trainShell, '#f1dda0');
+  assert.equal(CARRIAGE_COLORS.seafoam.trainShell, '#2d6b6a');
+});
+
+test('MVP carriage bounds leave a taller upper stage above the platform', () => {
+  for (const level of MVP_LEVELS) {
+    assert.ok(level.trainBounds.height >= 240, `${level.id} should use the taller carriage bounds`);
+    assert.equal(level.trainBounds.y + level.trainBounds.height, level.platformBounds.y);
+  }
+});
+
+test('closed carriage doors hide interior passengers until they open', () => {
+  const level = MVP_LEVELS[0];
+  const simulation = new GameSimulation(level, 4242);
+  const state = simulation.getState();
+  const passenger = state.passengers.find((item) => item.role === 'alighting');
+  assert.ok(passenger);
+  passenger.kind = 'regular';
+  passenger.position = { x: level.doors[0].center.x, y: level.trainBounds.y + 72 };
+  for (const other of state.passengers) {
+    if (other !== passenger) other.role = 'exited';
+  }
+
+  const context = new MockContext({ nativeRoundRect: false });
+  const metrics = createViewportMetrics(375, 667);
+  const renderContext = new RenderContext(context, metrics, {
+    x: 0,
+    y: level.trainBounds.y,
+    width: 320,
+    height: level.trainBounds.height + level.platformBounds.height,
+  });
+  const bodyWasDrawn = () => context.operations.some(([name, x, y]) =>
+    name === 'translate' && x === passenger.position.x && y === passenger.position.y,
+  );
+
+  state.doors[0].open = false;
+  state.doors[0].blocked = false;
+  renderActors(renderContext, state, level);
+  assert.equal(bodyWasDrawn(), false);
+
+  context.operations.length = 0;
+  state.doors[0].open = true;
+  renderActors(renderContext, state, level);
+  assert.equal(bodyWasDrawn(), true);
+
+  context.operations.length = 0;
+  state.doors[0].blocked = true;
+  renderActors(renderContext, state, level);
+  assert.equal(bodyWasDrawn(), false);
+});
+
 test('roundRect uses native API when available and a quadratic fallback otherwise', () => {
   const native = new MockContext({ nativeRoundRect: true });
   fillRoundRect(native, 1, 2, 30, 20, 8, '#fff');
@@ -344,6 +416,33 @@ test('M8 visual sample emits depth and character primitives', () => {
   assert.equal(names.includes('rotate'), false);
   assert.ok(names.filter((name) => name === 'roundRect' || name === 'quadraticCurveTo').length >= 8);
   assert.ok(names.filter((name) => name === 'lineTo').length >= 20);
+});
+
+test('each NPC kind renders an independent silhouette', () => {
+  const kinds = ['regular', 'fast', 'slow', 'luggage', 'phone', 'group'];
+  const silhouettes = kinds.map((kind) => NPC_VISUAL_PROFILES[kind].silhouette);
+  assert.equal(new Set(silhouettes).size, kinds.length);
+
+  const signatures = kinds.map((kind) => {
+    const context = new MockContext({ nativeRoundRect: false });
+    const metrics = createViewportMetrics(375, 667);
+    const renderContext = new RenderContext(context, metrics, { x: 0, y: -160, width: 320, height: 728 });
+    const simulation = new GameSimulation(MVP_LEVELS[2], 9090);
+    const state = simulation.getState();
+    const target = state.passengers[0];
+    assert.ok(target);
+    target.kind = kind;
+    target.role = 'waiting';
+    target.position = { x: 160, y: 220 };
+    for (const passenger of state.passengers.slice(1)) passenger.role = 'exited';
+    renderActors(renderContext, state, MVP_LEVELS[2]);
+    return context.operations
+      .filter(([name]) => name !== 'save' && name !== 'restore')
+      .map(([name, ...args]) => `${name}:${args.join(',')}`)
+      .join('|');
+  });
+
+  assert.equal(new Set(signatures).size, kinds.length, 'NPC silhouettes should not collapse to one shared drawing');
 });
 
 test('player Sprite loads asynchronously, switches frames, and keeps geometry fallback', () => {

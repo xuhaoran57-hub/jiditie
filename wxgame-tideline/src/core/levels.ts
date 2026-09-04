@@ -1,7 +1,9 @@
 import type { DoorConfig, LevelConfig } from './types.ts';
 
 const platform = () => ({ x: 0, y: 0, width: 320, height: 568 });
-const train = () => ({ x: 0, y: -160, width: 320, height: 160 });
+// 车厢底边仍与站台门线重合；再增加上方高度，让横屏车厢内部有足够容纳角色的空间。
+const CARRIAGE_HEIGHT = 240;
+const train = () => ({ x: 0, y: -CARRIAGE_HEIGHT, width: 320, height: CARRIAGE_HEIGHT });
 
 function door(
   id: string,
@@ -37,6 +39,7 @@ const seaGate: LevelConfig = {
   name: '海风门',
   stationName: '海风门站',
   description: '单门低密度教学，雨伞流经过时先看清可用的横向空间。',
+  carriageTheme: 'pearl',
   phaseDurations: { intro: 0.8, arriving: 1.1, positioning: 0.8, exiting: 2.4 },
   boardingDuration: 7.5,
   warningThreshold: 2,
@@ -79,6 +82,7 @@ const cloudHarbor: LevelConfig = {
   name: '云港',
   stationName: '云港站',
   description: '双门换位关，临时换门时要观察并切换入口。',
+  carriageTheme: 'yellow',
   phaseDurations: { intro: 0.8, arriving: 1.2, positioning: 0.9, exiting: 2.8 },
   boardingDuration: 8.2,
   warningThreshold: 2.2,
@@ -122,6 +126,7 @@ const starRing: LevelConfig = {
   name: '星环城',
   stationName: '星环城站',
   description: '高密度短倒计时，绕开行李车并把握疏导时机。',
+  carriageTheme: 'seafoam',
   phaseDurations: { intro: 0.6, arriving: 0.9, positioning: 0.6, exiting: 2.1 },
   boardingDuration: 5.6,
   warningThreshold: 1.8,
