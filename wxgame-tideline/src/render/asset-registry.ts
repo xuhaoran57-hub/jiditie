@@ -6,6 +6,7 @@
 export const ART_ASSET_PATHS = {
   sprite: 'assets/generated/tideline-sprite.svg',
   playerSprite: 'assets/generated/tideline-player-sprite.png',
+  passengerRegularSprite: 'assets/generated/tideline-passenger-regular-sprite.png',
 } as const;
 
 export type ArtAssetId = keyof typeof ART_ASSET_PATHS;

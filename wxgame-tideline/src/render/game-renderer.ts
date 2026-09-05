@@ -16,6 +16,7 @@ import {
 } from './canvas-ui.ts';
 import { renderStation } from './station-renderer.ts';
 import { loadPlayerSprite, type PlayerSpriteAsset } from './player-sprite.ts';
+import { loadPassengerRegularSprite, type PassengerSpriteAsset } from './passenger-sprite.ts';
 
 export type RenderScreen = 'game' | 'route' | 'result';
 
@@ -32,6 +33,7 @@ export interface RenderAssetOptions {
   /** 可选的微信图片工厂；未提供或解码失败时继续使用几何角色。 */
   imageFactory?: CanvasImageFactory;
   playerSprite?: PlayerSpriteAsset;
+  passengerSprite?: PassengerSpriteAsset;
 }
 
 function worldBoundsFor(level: LevelConfig): Rect {
@@ -52,6 +54,7 @@ export class GameRenderer {
   readonly context: RenderContext;
   private readonly canvas?: CanvasLike;
   readonly playerSprite?: PlayerSpriteAsset;
+  readonly passengerSprite?: PassengerSpriteAsset;
 
   constructor(
     context: RenderContext,
@@ -60,7 +63,14 @@ export class GameRenderer {
   ) {
     this.context = context;
     this.canvas = canvas;
+    const passengerSprite = assets.passengerSprite
+      ?? loadPassengerRegularSprite(assets.imageFactory);
     this.playerSprite = assets.playerSprite ?? loadPlayerSprite(assets.imageFactory);
+    // 某些测试桩或低版本运行时可能复用同一个 Image 对象；避免第二次设置
+    // src 覆盖玩家图集，普通 NPC 在这种情况下回退到几何绘制。
+    this.passengerSprite = passengerSprite?.image === this.playerSprite?.image
+      ? undefined
+      : passengerSprite;
   }
 
   static fromCanvas(
@@ -76,7 +86,7 @@ export class GameRenderer {
     if (!context) throw new Error('a 2d canvas context is required');
     const viewport = createViewportMetrics(width, height, dpr, insets);
     configureCanvas(canvas, context, viewport);
-    const fallbackWorld: Rect = level ? worldBoundsFor(level) : { x: 0, y: -240, width: 320, height: 808 };
+    const fallbackWorld: Rect = level ? worldBoundsFor(level) : { x: 0, y: -300, width: 320, height: 868 };
     return new GameRenderer(new RenderContext(context, viewport, fallbackWorld), canvas, assets);
   }
 
@@ -113,7 +123,7 @@ export class GameRenderer {
     }
     this.context.clear('#0b1627');
     renderStation(this.context, level, state);
-    renderActors(this.context, state, level, this.playerSprite);
+    renderActors(this.context, state, level, this.playerSprite, this.passengerSprite);
     renderEffects(this.context, level, state);
     renderHud(this.context, level, state);
 

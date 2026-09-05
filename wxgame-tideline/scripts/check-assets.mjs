@@ -10,6 +10,7 @@ const requiredFiles = [
   'generated/tideline-sprite.svg',
   'generated/tideline-player-sprite.svg',
   'generated/tideline-player-sprite.png',
+  'generated/tideline-passenger-regular-sprite.png',
   'audio/tideline-loop.wav',
   'audio/ui-guide.wav',
   'audio/ui-success.wav',
@@ -66,14 +67,22 @@ try {
   fail(`玩家 Sprite SVG 无法读取：${error instanceof Error ? error.name : 'unknown'}`);
 }
 
-try {
-  const playerPng = readFileSync(resolve(assetsDir, 'generated/tideline-player-sprite.png'));
+function checkSpritePng(relative, label) {
+  try {
+    const spritePng = readFileSync(resolve(assetsDir, relative));
   const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  if (!playerPng.subarray(0, 8).equals(pngSignature)) fail('玩家 Sprite PNG 不是有效 PNG');
-  if (playerPng.length > 128 * 1024) fail('玩家 Sprite PNG 超过 128KB 包体预算');
-} catch (error) {
-  fail(`玩家 Sprite PNG 无法读取：${error instanceof Error ? error.name : 'unknown'}`);
+    if (!spritePng.subarray(0, 8).equals(pngSignature)) fail(`${label} PNG 不是有效 PNG`);
+    if (spritePng.readUInt32BE(16) !== 256 || spritePng.readUInt32BE(20) !== 64) {
+      fail(`${label} PNG 必须是 256x64 四帧图集`);
+    }
+    if (spritePng.length > 128 * 1024) fail(`${label} PNG 超过 128KB 包体预算`);
+  } catch (error) {
+    fail(`${label} PNG 无法读取：${error instanceof Error ? error.name : 'unknown'}`);
+  }
 }
+
+checkSpritePng('generated/tideline-player-sprite.png', '玩家 Sprite');
+checkSpritePng('generated/tideline-passenger-regular-sprite.png', '普通 NPC Sprite');
 
 for (const relative of requiredFiles.filter((file) => file.endsWith('.wav'))) {
   try {

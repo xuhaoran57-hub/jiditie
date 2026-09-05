@@ -6,6 +6,7 @@
 | 文件 | 类型 | 制作者/生成工具 | 来源或提示词记录 | 版本 | 许可证/商用范围 | 人工修改 | 相似性复核 | 备注 |
 |---|---|---|---|---|---|---|---|---|
 | `generated/tideline-player-sprite.png` | PNG Q 版玩家帧图集 | `scripts/generate-player-sprite.py` | 由项目内 SVG 源文件重绘，四帧待机/行走/疏导动作 | 0.1.0 | 项目自有；随最终项目许可证 | 是，人工绘制与脚本栅格化 | 初检通过；发布前需第二人复核 | 微信运行时优先加载，PNG 解码兼容性更好 |
+| `generated/tideline-passenger-regular-sprite.png` | PNG 普通 NPC 四帧 Sprite 图集 | 内置 `image_gen` + Pillow 后处理 | 参考项目玩家 Sprite 风格生成普通通勤客；四帧待机/行走/疏导挥手 | 0.1.0 | 项目自有；随最终项目许可证 | 是，去除棋盘背景、裁切四帧并缩放为 256×64，保留透明通道 | 初检通过；发布前需第二人复核 | 普通 NPC 专用，加载失败时回退 Canvas 几何造型 |
 | `generated/tideline-player-sprite.svg` | SVG Q 版玩家帧图集 | 项目内手工 SVG | `VISUAL_SPEC.md`；四帧待机/行走/疏导动作，无外部参考图 | 0.1.0 | 项目自有；随最终项目许可证 | 是，人工绘制 | 初检通过；发布前需第二人复核 | 玩家 Sprite，微信图片解码失败时几何回退 |
 | `generated/tideline-sprite.svg` | SVG 矢量精灵 | 项目内手工 SVG | `VISUAL_SPEC.md`；抽象几何，无外部参考图 | 0.1.0 | 项目自有；随最终项目许可证 | 是，人工绘制 | 初检通过；发布前需第二人复核 | 玩家、6 类乘客、站台徽章、按钮图标 |
 | `audio/tideline-loop.wav` | PCM WAV 循环氛围 | `scripts/generate-audio.mjs` | 确定性正弦/三角波参数，无采样 | 0.1.0 | 项目自有；随最终项目许可证 | 否 | 初检通过；真机试听待 M7 | 1.5s，22050Hz，单声道 |

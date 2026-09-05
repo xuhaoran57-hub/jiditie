@@ -3,6 +3,7 @@ import { clamp, normalize } from '../core/vector.ts';
 import { fillRoundRect, RenderContext, strokeRoundRect } from './context.ts';
 import { TIDELINE_TOKENS } from './design-tokens.ts';
 import type { PlayerSpriteAsset } from './player-sprite.ts';
+import type { PassengerSpriteAsset } from './passenger-sprite.ts';
 
 interface CharacterPalette {
   shirt: string;
@@ -265,6 +266,43 @@ function drawPlayerSprite(
     return true;
   } catch {
     // 图片解码或低版本 Canvas 不支持时，调用方继续绘制几何角色。
+    return false;
+  }
+}
+
+function drawPassengerSprite(
+  context: RenderContext,
+  sprite: PassengerSpriteAsset,
+  frameIndex: number,
+  size: number,
+  baseScale: number,
+): boolean {
+  const { ctx } = context;
+  if (!sprite.ready || sprite.failed || typeof ctx.drawImage !== 'function') return false;
+  const frame = sprite.frames[frameIndex % sprite.frames.length];
+  if (!frame) return false;
+  ctx.save();
+  try {
+    // 与几何角色使用同一套横屏纵向补偿和基础尺寸，避免图像 Sprite
+    // 在横屏压缩后变扁，或因像素尺寸不同而显得明显偏大。
+    compensateLandscapeScale(context);
+    const visualScale = actorVisualScale(context, baseScale);
+    ctx.scale(visualScale, visualScale);
+    ctx.drawImage(
+      sprite.image,
+      frame.sx,
+      frame.sy,
+      frame.width,
+      frame.height,
+      -size / 2,
+      -size / 2,
+      size,
+      size,
+    );
+    ctx.restore();
+    return true;
+  } catch {
+    ctx.restore();
     return false;
   }
 }
@@ -777,7 +815,12 @@ function drawCharacterBody(
   ctx.restore();
 }
 
-function drawPassenger(context: RenderContext, passenger: Passenger, now: number): void {
+function drawPassenger(
+  context: RenderContext,
+  passenger: Passenger,
+  now: number,
+  passengerSprite?: PassengerSpriteAsset,
+): void {
   const { ctx } = context;
   const palette = PASSENGER_PALETTES[passenger.kind];
   const inside = passenger.role === 'inside';
@@ -817,7 +860,22 @@ function drawPassenger(context: RenderContext, passenger: Passenger, now: number
     ctx.scale(squash, 1 - (squash - 1));
   }
   // 角色始终以屏幕上方为头部方向；行走状态只改变步伐，不旋转人物轮廓。
-  drawCharacterBody(context, palette, passenger.radius, moving ? walkPhase : phase, passenger.kind, inside || boarding);
+  const frameDuration = Number.isFinite(passengerSprite?.frameDuration) && (passengerSprite?.frameDuration ?? 0) > 0
+    ? passengerSprite!.frameDuration
+    : 0.12;
+  const spriteFrame = guideStrength > 0
+    ? 3
+    : moving
+      ? 1 + (Math.floor(now / frameDuration) % 2)
+      : 0;
+  const spriteBaseScale = Math.max(0.76, Math.min(1.65, (passenger.radius / 9) * (inside || boarding ? 1.1 : 1)));
+  const spriteSize = 32;
+  const spriteDrawn = passenger.kind === 'regular' && passengerSprite
+    ? drawPassengerSprite(context, passengerSprite, spriteFrame, spriteSize, spriteBaseScale)
+    : false;
+  if (!spriteDrawn) {
+    drawCharacterBody(context, palette, passenger.radius, moving ? walkPhase : phase, passenger.kind, inside || boarding);
+  }
   ctx.restore();
   if (guideStrength > 0) {
     ctx.save();
@@ -989,6 +1047,7 @@ export function renderActors(
   state: GameState,
   _level: LevelConfig,
   playerSprite?: PlayerSpriteAsset,
+  passengerSprite?: PassengerSpriteAsset,
 ): void {
   renderContext.withWorld(() => {
     // 关门时不绘制车内/下车中的角色；开门后才让他们从门洞中出现。
@@ -1000,7 +1059,7 @@ export function renderActors(
         if (left.role !== 'inside' && right.role === 'inside') return 1;
         return left.position.y - right.position.y;
       });
-    for (const passenger of passengers) drawPassenger(renderContext, passenger, state.elapsed);
+    for (const passenger of passengers) drawPassenger(renderContext, passenger, state.elapsed, passengerSprite);
     drawPlayer(renderContext, state, playerSprite);
   });
 }

@@ -1,8 +1,8 @@
 import type { DoorConfig, LevelConfig } from './types.ts';
 
 const platform = () => ({ x: 0, y: 0, width: 320, height: 568 });
-// 车厢底边仍与站台门线重合；再增加上方高度，让横屏车厢内部有足够容纳角色的空间。
-const CARRIAGE_HEIGHT = 240;
+// 车厢底边仍与站台门线重合；增加上方高度，让横屏车厢内部有足够容纳角色的空间。
+const CARRIAGE_HEIGHT = 300;
 const train = () => ({ x: 0, y: -CARRIAGE_HEIGHT, width: 320, height: CARRIAGE_HEIGHT });
 
 function door(

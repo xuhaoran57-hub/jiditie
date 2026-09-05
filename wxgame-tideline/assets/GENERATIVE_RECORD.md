@@ -27,3 +27,12 @@
 - 运行时文件：`generated/tideline-player-sprite.png`，由 `scripts/generate-player-sprite.py` 从同一套几何规范栅格化生成。
 - 制作方式：项目内手工绘制的 256x64 四帧 SVG 图集，帧 0 为待机，帧 1/2 为行走，帧 3 为疏导挥手。
 - 使用方式：渲染层通过 `wx.createImage` 可选加载；图片不可用时回退到 Canvas 几何角色。
+
+## 普通 NPC Sprite
+
+- 文件：`generated/tideline-passenger-regular-sprite.png`
+- 生成工具：内置 `image_gen`；参考项目内 `generated/tideline-player-sprite.png` 的 Q 版比例、深色描边和配色。
+- 生成内容：单个雾蓝上衣、深色裤子、斜挎包的普通通勤客，横向四帧为待机、左步、右步和疏导挥手；无文字、Logo、站牌或第三方素材。
+- 后处理：使用 Pillow 从生成预览中分离角色，移除棋盘背景，裁切四帧，统一基线并缩放为 256×64 RGBA 图集；项目运行时通过 `wx.createImage` 加载。
+- 失败回退：图片未加载或解码失败时继续使用 `actor-renderer.ts` 中的普通 NPC 几何造型。
+- 复核：已检查尺寸、PNG 签名和 alpha 通道；发布前仍需第二人进行相似性和运行时复核。

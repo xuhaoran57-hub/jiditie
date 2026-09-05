@@ -31,6 +31,9 @@ import {
 // 关门倒计时都消耗在接近门口上；数值不改变容量规则。
 const BOARDING_SPEED_MULTIPLIER = 1.8;
 const TRAIN_INTERIOR_TOP_OFFSET = 108;
+// 车厢加高只扩展门线以上的空间；上车角色仍应在门后较近的地板区域就位，
+// 避免目标点随车厢顶部一起后移，导致倒计时内走不完。
+const TRAIN_INTERIOR_MAX_DEPTH = 132;
 const TRAIN_INTERIOR_ROW_GAP = 16;
 const TRAIN_ALIGHTING_TOP_PADDING = 24;
 const TRAIN_ALIGHTING_DOOR_PADDING = 26;
@@ -339,8 +342,11 @@ function enterTrainPoint(train: Rect, door: DoorConfig, index: number): Vec2 {
   // 目标以所选车门为中心，先直穿门洞，再在车内形成三列小队。
   const laneOffset = ((index % 3) - 1) * 18;
   const x = clamp(door.center.x + laneOffset, train.x + 16, train.x + train.width - 16);
-  const interiorTop = train.y + Math.max(24, Math.min(train.height - 24, TRAIN_INTERIOR_TOP_OFFSET));
-  const y = interiorTop + Math.floor(index / 3) * TRAIN_INTERIOR_ROW_GAP;
+  const interiorOffset = Math.max(24, Math.min(train.height - 24, TRAIN_INTERIOR_TOP_OFFSET));
+  const topBasedY = train.y + interiorOffset;
+  const depthLimitedY = train.y + train.height - TRAIN_INTERIOR_MAX_DEPTH;
+  const interiorY = Math.max(topBasedY, depthLimitedY);
+  const y = interiorY + Math.floor(index / 3) * TRAIN_INTERIOR_ROW_GAP;
   return clampPointToRect({ x, y }, train, 14);
 }
 

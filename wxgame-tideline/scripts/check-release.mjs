@@ -27,6 +27,7 @@ const REQUIRED_FILES = [
   'assets/generated/tideline-sprite.svg',
   'assets/generated/tideline-player-sprite.svg',
   'assets/generated/tideline-player-sprite.png',
+  'assets/generated/tideline-passenger-regular-sprite.png',
   'assets/audio/tideline-loop.wav',
   'assets/audio/ui-guide.wav',
   'assets/audio/ui-success.wav',

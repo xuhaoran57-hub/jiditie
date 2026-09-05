@@ -251,6 +251,8 @@ test('上车角色能穿过门槛并落在车厢内', () => {
   }
   assert.equal(passenger.role, 'boarding');
   assert.ok(passenger.position.y > 0, '开始上车时仍应位于门前，随后再穿过门槛');
+  assert.ok(passenger.target.y >= level.trainBounds.y + 24, '上车目标不能贴近车厢顶端');
+  assert.ok(passenger.target.y >= level.trainBounds.y + level.trainBounds.height - 132, '上车目标应保持在门后近处');
 
   for (let index = 0; index < 60 && passenger.role !== 'inside'; index += 1) {
     simulation.step(1 / 30, { move: { x: 0, y: 0 } });
@@ -284,7 +286,8 @@ test('门前上车通道不会被站在安全区的玩家堵住', () => {
     simulation.step(1 / 30, { move: { x: 0, y: 0 } });
   }
   assert.equal(passenger.role, 'boarding');
-  assert.ok(passenger.target.y < level.trainBounds.y + 120);
+  assert.ok(passenger.target.y >= level.trainBounds.y + 24);
+  assert.ok(passenger.target.y >= level.trainBounds.y + level.trainBounds.height - 132);
 });
 
 test('损坏或未来版本存档安全回退，正常存档可往返', () => {

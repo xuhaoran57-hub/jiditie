@@ -20,6 +20,7 @@ import {
   roundRectPath,
   STATION_COLORS,
   stationColorsFor,
+  loadPassengerRegularSprite,
 } from '../src/render/index.ts';
 
 class MockContext {
@@ -225,7 +226,7 @@ test('carriage palettes stay distinct and legacy levels fall back safely', () =>
 
 test('MVP carriage bounds leave a taller upper stage above the platform', () => {
   for (const level of MVP_LEVELS) {
-    assert.ok(level.trainBounds.height >= 240, `${level.id} should use the taller carriage bounds`);
+    assert.equal(level.trainBounds.height, 300, `${level.id} should use the 300px carriage bounds`);
     assert.equal(level.trainBounds.y + level.trainBounds.height, level.platformBounds.y);
   }
 });
@@ -484,6 +485,70 @@ test('player Sprite loads asynchronously, switches frames, and keeps geometry fa
   renderer.render(state, level, { showControls: false });
   const spriteCallsAfterFailure = context.operations.filter(([name]) => name === 'drawImage').length;
   assert.equal(spriteCallsAfterFailure, 2, 'failed image decoding should use geometry fallback');
+});
+
+test('regular passenger Sprite loads, animates movement/guide, and falls back on decode failure', () => {
+  const image = {
+    src: '',
+    width: 0,
+    height: 0,
+    complete: false,
+    onload: undefined,
+    onerror: undefined,
+  };
+  const sprite = loadPassengerRegularSprite(() => image);
+  assert.ok(sprite);
+  assert.equal(image.src, 'assets/generated/tideline-passenger-regular-sprite.png');
+  assert.deepEqual(sprite.frames.map((frame) => frame.sx), [0, 64, 128, 192]);
+  image.onload?.();
+
+  const context = new MockContext({ nativeRoundRect: false });
+  const metrics = createViewportMetrics(375, 667);
+  const renderContext = new RenderContext(context, metrics, {
+    x: 0,
+    y: -300,
+    width: 320,
+    height: 868,
+  });
+  const level = MVP_LEVELS[0];
+  const state = new GameSimulation(level, 6161).getState();
+  const target = state.passengers[0];
+  assert.ok(target);
+  target.kind = 'regular';
+  target.role = 'waiting';
+  target.position = { x: 160, y: 220 };
+  target.guidedUntil = 0;
+  for (const passenger of state.passengers.slice(1)) passenger.role = 'exited';
+
+  renderActors(renderContext, state, level, undefined, sprite);
+  const idleDraw = context.operations.find(([name]) => name === 'drawImage');
+  assert.ok(idleDraw);
+  assert.equal(idleDraw[1], image);
+  assert.equal(idleDraw[2], 0);
+
+  context.operations.length = 0;
+  target.role = 'boarding';
+  state.doors[0].open = true;
+  state.doors[0].blocked = false;
+  state.elapsed = 0.2;
+  renderActors(renderContext, state, level, undefined, sprite);
+  const walkingDraw = context.operations.find(([name]) => name === 'drawImage');
+  assert.ok(walkingDraw);
+  assert.ok([64, 128].includes(walkingDraw[2]), 'boarding should use a walking frame');
+
+  context.operations.length = 0;
+  target.role = 'waiting';
+  target.guidedUntil = state.elapsed + 0.4;
+  renderActors(renderContext, state, level, undefined, sprite);
+  const guideDraw = context.operations.find(([name]) => name === 'drawImage');
+  assert.ok(guideDraw);
+  assert.equal(guideDraw[2], 192, 'guided passenger should use the wave frame');
+
+  context.operations.length = 0;
+  image.onerror?.();
+  renderActors(renderContext, state, level, undefined, sprite);
+  assert.equal(context.operations.some(([name]) => name === 'drawImage'), false);
+  assert.ok(context.operations.some(([name]) => name === 'roundRect' || name === 'quadraticCurveTo'));
 });
 
 test('passenger body is translated to its world position', () => {
