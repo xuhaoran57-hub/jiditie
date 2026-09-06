@@ -1,4 +1,4 @@
-// 《潮汐线：赶上这班车》微信小游戏入口。
+// 《挤上这班车》微信小游戏入口，世界观线路为虚构的“潮汐线”。
 // 运行前先执行 npm run build:wxgame，把 TypeScript 运行时输出到 dist/。
 (function bootstrapTideline() {
   // 部分微信开发者工具版本在 game.js 刚加载时尚未完成 JSBridge 初始化。
@@ -57,7 +57,7 @@
     context.textBaseline = 'middle';
     context.fillStyle = '#ff8a28';
     context.font = '900 28px sans-serif';
-    context.fillText('潮汐线', width / 2, height / 2 - 30);
+    context.fillText('挤上这班车', width / 2, height / 2 - 30);
     context.fillStyle = '#f6fbff';
     context.font = '600 15px sans-serif';
     context.fillText(message, width / 2, height / 2 + 10);

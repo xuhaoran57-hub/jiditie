@@ -172,6 +172,7 @@ test('M7 快速启动/停止、前后台暂停和连续切关不产生状态串�
 
   runtime.markUserGesture();
   assert.equal(runtime.selectLevel('sea-gate'), true);
+  assert.equal(runtime.confirmStart(), true);
   const elapsedBeforeHide = runtime.state.elapsed;
   lifecycle.paused = true;
   runtime.tick(1);
@@ -192,10 +193,12 @@ test('M7 快速启动/停止、前后台暂停和连续切关不产生状态串�
   assert.equal(runtime.screen, 'result');
   assert.equal(runtime.state.outcome, 'success');
   assert.equal(runtime.nextLevel(), true);
-  assert.equal(runtime.selectedLevelId, 'cloud-harbor');
+  assert.equal(runtime.screen, 'briefing');
+  assert.equal(runtime.confirmStart(), true);
+  assert.equal(runtime.selectedLevelId, 'lighthouse-bay');
   assert.equal(runtime.screen, 'game');
   assert.equal(runtime.retry(), true);
-  assert.equal(runtime.selectedLevelId, 'cloud-harbor');
+  assert.equal(runtime.selectedLevelId, 'lighthouse-bay');
   assert.equal(runtime.state.elapsed, 0);
   runtime.backToRoute();
   assert.equal(runtime.screen, 'route');

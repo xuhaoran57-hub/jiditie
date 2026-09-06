@@ -396,6 +396,7 @@ function drawDoor(
   blocked = false,
   now = 0,
   colors: StationColors = STATION_COLORS,
+  warning = false,
 ): void {
   const { ctx } = context;
   const half = door.width / 2;
@@ -403,7 +404,9 @@ function drawDoor(
   const top = train.y + 52 * carriageVerticalScale(train.height);
   const bottom = door.center.y + 5;
   const height = bottom - top;
-  const frameColor = blocked
+  const frameColor = warning
+    ? '#ffb347'
+    : blocked
     ? '#ef6b78'
     : selected
       ? '#f7ffff'
@@ -473,7 +476,17 @@ function drawDoor(
   ctx.fillRect(left + 8, top + 4, door.width - 16, 3);
   ctx.restore();
 
-  // 选中门的双层呼吸框，避免只靠单一颜色传达状态。
+  if (warning) {
+    ctx.save();
+    const blink = 0.28 + (Math.sin(now * Math.PI * 4) + 1) * 0.28;
+    ctx.globalAlpha = blink;
+    ctx.strokeStyle = '#ffd36e';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(left - 5, top - 5, door.width + 10, height + 10);
+    ctx.restore();
+  }
+
+  // 保留参数以兼容旧渲染调用；运行时不再传入选中门，避免产生选中/非选中玩法。
   if (selected) {
     ctx.save();
     ctx.globalAlpha = 0.28 + (Math.sin(now * 6 + door.center.x * 0.08) + 1) * 0.04;
@@ -483,7 +496,7 @@ function drawDoor(
     ctx.restore();
   }
 
-  // 站台侧安全区采用低饱和底色，仍保留触控识别度。
+  // 站台侧安全区采用低饱和底色，提示所有开放门都可进入。
   ctx.save();
   ctx.globalAlpha = 0.13;
   ctx.fillStyle = colors.safeZone;
@@ -502,7 +515,7 @@ function drawDoor(
   ctx.fill();
   drawWorldText(
     context,
-    blocked ? '避让' : open ? '可进' : '等待',
+    warning ? '即将关闭' : blocked ? '避让' : open ? '可进' : '等待',
     { x: door.center.x, y: door.safeZone.y + 8 },
     canvasFont(700, 9),
     frameColor,
@@ -550,6 +563,20 @@ function drawEventOverlay(context: RenderContext, state: GameState, platform: Re
       TIDELINE_TOKENS.color.luggageCartText,
     );
     ctx.restore();
+  } else if (active.kind === 'crowd-surge') {
+    ctx.save();
+    ctx.globalAlpha = 0.42;
+    ctx.strokeStyle = '#ffb36b';
+    ctx.lineWidth = 2;
+    for (let y = platform.y + 28; y < platform.y + platform.height - 18; y += 34) {
+      ctx.beginPath();
+      ctx.moveTo(platform.x + 16, y);
+      ctx.lineTo(platform.x + 40, y);
+      ctx.moveTo(platform.x + platform.width - 16, y + 10);
+      ctx.lineTo(platform.x + platform.width - 40, y + 10);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 }
 
@@ -573,10 +600,13 @@ export function renderStation(
         level.trainBounds,
         door,
         (runtime?.open ?? false) && !(runtime?.blocked ?? false),
-        state.player.selectedDoorId === door.id,
+        false,
         runtime?.blocked ?? false,
         state.elapsed,
         colors,
+        state.activeEvent?.kind === 'door-close'
+          && state.activeEvent.phase === 'warning'
+          && state.activeEvent.fromDoorId === door.id,
       );
       if (runtime && runtime.occupancy > 0) {
         const occupancyRatio = clamp(runtime.occupancy / Math.max(1, level.carriageCapacity), 0, 1);

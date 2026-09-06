@@ -20,6 +20,8 @@ import {
   roundRectPath,
   STATION_COLORS,
   stationColorsFor,
+  loadPassengerAtlasSprite,
+  loadPassengerFastSprite,
   loadPassengerRegularSprite,
 } from '../src/render/index.ts';
 
@@ -146,6 +148,7 @@ test('landscape actors use a compact visual scale that fits the carriage', () =>
   const level = MVP_LEVELS[0];
   const simulation = new GameSimulation(level, 2026);
   const state = simulation.getState();
+  state.phase = 'exiting';
   const passenger = state.passengers[0];
   assert.ok(passenger);
   passenger.kind = 'regular';
@@ -208,7 +211,7 @@ test('GameRenderer draws the horizontal world without rotating the canvas', () =
 test('MVP stations progress through the three carriage themes', () => {
   assert.deepEqual(CARRIAGE_THEMES, ['pearl', 'yellow', 'seafoam']);
   assert.deepEqual(MVP_LEVELS.map((level) => level.carriageTheme), ['pearl', 'yellow', 'seafoam']);
-  assert.deepEqual(MVP_LEVELS.map((level) => level.doors.length), [1, 2, 2]);
+  assert.deepEqual(MVP_LEVELS.map((level) => level.doors.length), [1, 1, 2]);
 });
 
 test('carriage palettes stay distinct and legacy levels fall back safely', () => {
@@ -430,6 +433,7 @@ test('each NPC kind renders an independent silhouette', () => {
     const renderContext = new RenderContext(context, metrics, { x: 0, y: -160, width: 320, height: 728 });
     const simulation = new GameSimulation(MVP_LEVELS[2], 9090);
     const state = simulation.getState();
+    state.phase = 'exiting';
     const target = state.passengers[0];
     assert.ok(target);
     target.kind = kind;
@@ -512,6 +516,7 @@ test('regular passenger Sprite loads, animates movement/guide, and falls back on
   });
   const level = MVP_LEVELS[0];
   const state = new GameSimulation(level, 6161).getState();
+  state.phase = 'exiting';
   const target = state.passengers[0];
   assert.ok(target);
   target.kind = 'regular';
@@ -543,6 +548,51 @@ test('regular passenger Sprite loads, animates movement/guide, and falls back on
   const guideDraw = context.operations.find(([name]) => name === 'drawImage');
   assert.ok(guideDraw);
   assert.equal(guideDraw[2], 192, 'guided passenger should use the wave frame');
+  assert.equal(guideDraw[3], 0, 'regular passenger should use the first atlas row');
+
+  context.operations.length = 0;
+  target.kind = 'fast';
+  target.guidedUntil = 0;
+  const atlasImage = {
+    src: '',
+    width: 0,
+    height: 0,
+    complete: false,
+    onload: undefined,
+    onerror: undefined,
+  };
+  const atlasSprite = loadPassengerAtlasSprite(() => atlasImage);
+  assert.ok(atlasSprite);
+  atlasImage.onload?.();
+  renderActors(renderContext, state, level, undefined, sprite, atlasSprite);
+  const fastDraw = context.operations.find(([name]) => name === 'drawImage');
+  assert.ok(fastDraw);
+  assert.equal(fastDraw[3], 64, 'fast passenger should use the second atlas row');
+
+  context.operations.length = 0;
+  const fastImage = {
+    src: '',
+    width: 0,
+    height: 0,
+    complete: false,
+    onload: undefined,
+    onerror: undefined,
+  };
+  const fastSprite = loadPassengerFastSprite(() => fastImage);
+  assert.ok(fastSprite);
+  fastImage.onload?.();
+  renderActors(renderContext, state, level, undefined, sprite, undefined, fastSprite);
+  const dedicatedFastDraw = context.operations.find(([name]) => name === 'drawImage');
+  assert.ok(dedicatedFastDraw);
+  assert.equal(dedicatedFastDraw[1], fastImage, 'fast passenger should use the dedicated PNG when ready');
+  assert.equal(dedicatedFastDraw[3], 0, 'dedicated fast PNG is a single row');
+  context.operations.length = 0;
+  fastImage.onerror?.();
+  renderActors(renderContext, state, level, undefined, sprite, atlasSprite, fastSprite);
+  const fallbackFastDraw = context.operations.find(([name]) => name === 'drawImage');
+  assert.ok(fallbackFastDraw);
+  assert.equal(fallbackFastDraw[1], atlasImage, 'failed dedicated fast Sprite should fall back to atlas');
+  assert.equal(fallbackFastDraw[3], 64, 'fallback fast passenger should keep the second atlas row');
 
   context.operations.length = 0;
   image.onerror?.();
@@ -557,6 +607,7 @@ test('passenger body is translated to its world position', () => {
   const level = MVP_LEVELS[0];
   const simulation = new GameSimulation(level, 2718);
   const state = simulation.getState();
+  state.phase = 'exiting';
   const target = state.passengers[0];
   assert.ok(target);
   const position = { x: 211.25, y: 301.75 };
@@ -577,4 +628,30 @@ test('passenger rendering has no continuous target-direction overlay', () => {
   const source = readFileSync(new URL('../src/render/actor-renderer.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /drawDirectionHint|drawSpeedTrails/);
   assert.doesNotMatch(source, /distance\(passenger\.position, passenger\.target\)/);
+});
+
+test('下车乘客穿过门洞后仍参与站台人流', () => {
+  const context = new MockContext({ nativeRoundRect: false });
+  const metrics = createViewportMetrics(375, 667);
+  const renderContext = new RenderContext(context, metrics, { x: 0, y: -160, width: 320, height: 728 });
+  const simulation = new GameSimulation(MVP_LEVELS[0], 4242);
+  const state = simulation.getState();
+  state.phase = 'exiting';
+  const target = state.passengers.find((item) => item.role === 'alighting');
+  assert.ok(target);
+  target.role = 'alighting';
+  target.routeProgress = 1;
+  target.doorId = 'a';
+  target.desiredDoorId = 'a';
+  target.position = { x: 160, y: 240 };
+  target.target = { x: 160, y: 500 };
+  const door = state.doors.find((item) => item.id === 'a');
+  assert.ok(door);
+  door.open = true;
+  door.blocked = true;
+  for (const passenger of state.passengers) {
+    if (passenger.id !== target.id) passenger.role = 'exited';
+  }
+  renderActors(renderContext, state, MVP_LEVELS[0]);
+  assert.ok(context.operations.some(([name, x, y]) => name === 'translate' && x === 160 && y === 240));
 });

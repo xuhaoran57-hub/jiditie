@@ -1,6 +1,6 @@
 import type { SaveData, SaveSettings } from './types.ts';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const CURRENT_SAVE_VERSION = SAVE_VERSION;
 export const DEFAULT_FIRST_LEVEL = 'sea-gate';
 
@@ -21,6 +21,12 @@ function scoreMap(value: unknown): Record<string, number> {
   return result;
 }
 
+function starsMap(value: unknown): Record<string, number> {
+  const scores = scoreMap(value);
+  for (const key of Object.keys(scores)) scores[key] = Math.min(3, scores[key]!);
+  return scores;
+}
+
 function stringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))];
@@ -31,7 +37,9 @@ export function emptySave(): SaveData {
     version: SAVE_VERSION,
     unlockedLevelIds: [DEFAULT_FIRST_LEVEL],
     bestScores: {},
+    bestStars: {},
     achievements: [],
+    appearanceId: 'default',
     settings: {
       soundEnabled: true,
       musicEnabled: true,
@@ -67,7 +75,11 @@ function sanitize(value: Record<string, unknown>): SaveData {
     version: SAVE_VERSION,
     unlockedLevelIds: unlocked,
     bestScores: scoreMap(value.bestScores ?? value.scores),
+    bestStars: starsMap(value.bestStars),
     achievements: stringList(value.achievements),
+    appearanceId: typeof value.appearanceId === 'string' && value.appearanceId.length > 0
+      ? value.appearanceId
+      : 'default',
     settings: sanitizeSettings(value.settings),
     stats: {
       plays: finiteInteger(statsSource.plays, fallback.stats.plays),
@@ -109,6 +121,20 @@ export function updateBestScore(save: SaveData, levelId: string, score: number):
   if (!levelId) return next;
   const safeScore = Math.round(Math.min(100, Math.max(0, Number.isFinite(score) ? score : 0)));
   next.bestScores[levelId] = Math.max(next.bestScores[levelId] ?? 0, safeScore);
+  return next;
+}
+
+export function updateBestStars(save: SaveData, levelId: string, stars: number): SaveData {
+  const next = migrateSave(save);
+  if (!levelId) return next;
+  const safeStars = Math.min(3, Math.max(0, Math.floor(Number.isFinite(stars) ? stars : 0)));
+  next.bestStars[levelId] = Math.max(next.bestStars[levelId] ?? 0, safeStars);
+  return next;
+}
+
+export function setAppearance(save: SaveData, appearanceId: string): SaveData {
+  const next = migrateSave(save);
+  next.appearanceId = typeof appearanceId === 'string' && appearanceId.length > 0 ? appearanceId : 'default';
   return next;
 }
 

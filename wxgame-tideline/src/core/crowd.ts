@@ -29,13 +29,17 @@ import {
 
 // 上车路线包含“走到门口”和“穿过门洞”两个连续阶段，适度加速避免整段
 // 关门倒计时都消耗在接近门口上；数值不改变容量规则。
-const BOARDING_SPEED_MULTIPLIER = 1.8;
+// 原作的人流会以稳定步速向门口汇聚，而不是瞬间冲刺；保留快步类型的
+// 速度差异，但把整体速度压到能观察、绕行和制造空隙的范围。
+const BOARDING_SPEED_MULTIPLIER = 1.35;
+// 下车客和上车客统一使用 1.35 倍步速，开门后保持同一节奏交汇，
+// 让门口拥挤来自真实的两股人流，而不是某一侧突然冲刺。
+const ALIGHTING_SPEED_MULTIPLIER = 1.35;
 const TRAIN_INTERIOR_TOP_OFFSET = 108;
 // 车厢加高只扩展门线以上的空间；上车角色仍应在门后较近的地板区域就位，
 // 避免目标点随车厢顶部一起后移，导致倒计时内走不完。
 const TRAIN_INTERIOR_MAX_DEPTH = 132;
 const TRAIN_INTERIOR_ROW_GAP = 16;
-const TRAIN_ALIGHTING_TOP_PADDING = 24;
 const TRAIN_ALIGHTING_DOOR_PADDING = 26;
 
 /** 均匀网格，用于碰撞 broad-phase；规则层不依赖渲染坐标系。 */
@@ -102,6 +106,7 @@ export function resolveCollisions(
   actors: CollisionActor[],
   iterations = 4,
   cellSize = 36,
+  onCollision?: (first: CollisionActor, second: CollisionActor) => void,
 ): number {
   const hash = new SpatialHash<CollisionActor>(cellSize);
   const collisionPairs = new Set<string>();
@@ -126,7 +131,11 @@ export function resolveCollisions(
         const minimumDistance = Math.max(0, actor.radius) + Math.max(0, other.radius);
         if (actualDistance >= minimumDistance - 1e-7) continue;
 
-        collisionPairs.add(`${actor.id}|${other.id}`);
+        const pairKey = `${actor.id}|${other.id}`;
+        if (!collisionPairs.has(pairKey)) {
+          collisionPairs.add(pairKey);
+          onCollision?.(actor, other);
+        }
         const normal =
           actualDistance > 1e-7 ? scale(delta, 1 / actualDistance) : deterministicNormal(actor.id, other.id);
         const overlap = Math.max(0.001, minimumDistance - actualDistance);
@@ -144,7 +153,8 @@ export function resolveCollisions(
         const relative = sub(actor.velocity, other.velocity);
         const normalSpeed = dot(relative, normal);
         if (normalSpeed < 0) {
-          const impulse = normalSpeed * 0.35;
+          // 降低碰撞后的反向回弹，避免连续帧在同一对角色之间左右震荡。
+          const impulse = normalSpeed * 0.55;
           if (actor.movable !== false) actor.velocity = sub(actor.velocity, scale(normal, impulse));
           if (other.movable !== false) other.velocity = add(other.velocity, scale(normal, impulse));
         }
@@ -240,14 +250,26 @@ export function createPassengers(level: LevelConfig, random: RandomSource): Pass
     const kind = weightedKind(level.passenger.kindWeights, random);
     const style = profile(kind);
     const selectedDoor = chooseDoor(level.doors, random, level.recommendedDoorId);
+    // 下车客从对应车门内侧的窄区域生成，形成开门瞬间的拥挤门口。
+    // 多门关卡会按各自目标门分组，避免人流横跨整节车厢。
+    const alightingWidth = Math.min(train.width, Math.max(selectedDoor.width * 1.8, 76));
+    const alightingBounds: Rect = {
+      x: clamp(selectedDoor.center.x - alightingWidth / 2, train.x, train.x + train.width - alightingWidth),
+      y: train.y + train.height - 84,
+      width: alightingWidth,
+      height: 58,
+    };
     const position = isAlighting
       ? spawnWithoutOverlap(
-          train,
+          alightingBounds,
           Math.max(level.passenger.spawnPadding / 2, style.radius + 6),
           random,
           occupied,
           style.radius * 2.1,
-          train.y + TRAIN_ALIGHTING_TOP_PADDING + style.radius,
+          // 参考原作，车内乘客集中在靠近门的下半段，而不是散布到车厢顶端。
+          // 这样一部分乘客能在窗口内走到站台外侧，剩余乘客会在门口形成阻挡。
+          // 下车客集中在车门内侧，开门后立刻形成第一道拥挤层。
+          train.y + train.height - 84,
           train.y + train.height - TRAIN_ALIGHTING_DOOR_PADDING,
         )
       : spawnWithoutOverlap(
@@ -337,6 +359,41 @@ export function keepOutsideRects(position: Vec2, radius: number, zones: readonly
   return next;
 }
 
+/** 行李车等移动障碍使用有限推力，避免进入占用区后瞬移到边缘。 */
+export function softPushOutsideRects(
+  position: Vec2,
+  radius: number,
+  zones: readonly Rect[],
+  dt: number,
+  maxSpeed = 72,
+): Vec2 {
+  let next = finiteVec(position, vec());
+  const safeDt = Math.max(0, Number.isFinite(dt) ? dt : 0);
+  const maxStep = Math.max(0, maxSpeed) * safeDt;
+  if (maxStep <= 0) return next;
+  for (const zone of zones) {
+    const safeRadius = Math.max(0, Number.isFinite(radius) ? radius : 0);
+    const left = Math.min(zone.x, zone.x + zone.width) - safeRadius;
+    const right = Math.max(zone.x, zone.x + zone.width) + safeRadius;
+    const top = Math.min(zone.y, zone.y + zone.height) - safeRadius;
+    const bottom = Math.max(zone.y, zone.y + zone.height) + safeRadius;
+    if (next.x < left || next.x > right || next.y < top || next.y > bottom) continue;
+    const distances = [
+      { side: 'left', value: Math.abs(next.x - left) },
+      { side: 'right', value: Math.abs(right - next.x) },
+      { side: 'top', value: Math.abs(next.y - top) },
+      { side: 'bottom', value: Math.abs(bottom - next.y) },
+    ] as const;
+    const nearest = distances.reduce((best, item) => (item.value < best.value ? item : best), distances[0]!);
+    const step = Math.min(maxStep, nearest.value + 0.01);
+    if (nearest.side === 'left') next.x -= step;
+    else if (nearest.side === 'right') next.x += step;
+    else if (nearest.side === 'top') next.y -= step;
+    else next.y += step;
+  }
+  return next;
+}
+
 function enterTrainPoint(train: Rect, door: DoorConfig, index: number): Vec2 {
   // 车内目标避开窗带和 HUD 覆盖区，落在门洞后方的地板上。
   // 目标以所选车门为中心，先直穿门洞，再在车内形成三列小队。
@@ -365,6 +422,11 @@ export function updatePassengers(
   context: PassengerUpdateContext,
 ): PassengerUpdateResult {
   const dt = Math.max(0, Number.isFinite(context.dt) ? context.dt : 0);
+  const speedMultiplier = clamp(
+    Number.isFinite(context.speedMultiplier) ? context.speedMultiplier ?? 1 : 1,
+    0.5,
+    1.8,
+  );
   const walkableBounds = context.walkableBounds ?? context.platformBounds;
   const blockedZones = context.blockedZones ?? [];
   let boarded = 0;
@@ -382,8 +444,32 @@ export function updatePassengers(
     passenger.radius = Number.isFinite(passenger.radius) ? Math.max(0, passenger.radius) : 0;
     passenger.weight = Number.isFinite(passenger.weight) ? Math.max(0.01, passenger.weight) : 1;
     passenger.speed = Number.isFinite(passenger.speed) ? Math.max(0, passenger.speed) : 0;
+    const moveSpeed = passenger.speed * speedMultiplier;
     if (passenger.role !== 'exited' && passenger.role !== 'inside') {
-      passenger.position = keepOutsideRects(passenger.position, passenger.radius, blockedZones);
+      passenger.position = softPushOutsideRects(passenger.position, passenger.radius, blockedZones, dt);
+    }
+    // 提前关门时，已经预留旧门车位但尚未完全进车的 NPC 也必须撤回，
+    // 否则 boarding 分支会继续沿用旧门目标，出现“避让门仍有人上车”。
+    if (
+      passenger.role === 'boarding'
+      && passenger.doorId === context.blockedDoorId
+      && context.rerouteDoorId
+    ) {
+      const reservedDoor = doorStateById(context.doorStates, context.blockedDoorId!);
+      if (reservedDoor) reservedDoor.occupancy = Math.max(0, reservedDoor.occupancy - 1);
+      passenger.role = 'waiting';
+      passenger.doorId = undefined;
+      passenger.desiredDoorId = context.rerouteDoorId;
+      passenger.target = {
+        x: clamp(
+          context.doors.find((item) => item.id === context.rerouteDoorId)?.center.x ?? passenger.position.x,
+          walkableBounds.x + passenger.radius,
+          walkableBounds.x + walkableBounds.width - passenger.radius,
+        ),
+        y: walkableBounds.y + 24,
+      };
+      passenger.position = clampPointToRect(passenger.position, walkableBounds, passenger.radius);
+      passenger.velocity = vec();
     }
     if (passenger.role === 'exited' || passenger.role === 'inside') {
       passenger.velocity = vec();
@@ -398,7 +484,10 @@ export function updatePassengers(
       // 乘客保持在车厢内部，避免一开局就出现在站台等候区。
       // blocked 门虽然可能仍带有 open 状态，也不能让乘客穿过；渲染层同样
       // 会隐藏这扇门内的角色，规则层和画面保持一致。
-      if (!context.alightingOpen || !doorState?.open || doorState.blocked) {
+      // 尚未越过门槛的下车乘客受原门状态约束；已经越过门洞的角色继续
+      // 作为站台下车流向外行走，并保留碰撞影响，直到走出站台边界。
+      const stillInsideCarriage = passenger.routeProgress < 1;
+      if (stillInsideCarriage && (!context.alightingOpen || !doorState?.open || doorState.blocked)) {
         passenger.velocity = vec();
         continue;
       }
@@ -407,24 +496,34 @@ export function updatePassengers(
           x: clamp(door.center.x, walkableBounds.x + passenger.radius, walkableBounds.x + walkableBounds.width - passenger.radius),
           y: walkableBounds.y + 26,
         };
-        advancePassenger(passenger, passenger.target, passenger.speed * dt, dt);
-        passenger.position = keepOutsideRects(passenger.position, passenger.radius, blockedZones);
+        advancePassenger(
+          passenger,
+          passenger.target,
+          moveSpeed * ALIGHTING_SPEED_MULTIPLIER * dt,
+          dt,
+        );
+        passenger.position = softPushOutsideRects(passenger.position, passenger.radius, blockedZones, dt);
         if (distance(passenger.position, passenger.target) <= passenger.radius + 5) {
+          // 角色圆心已经越过门洞，立即计为顺利下车；仍保留为 alighting
+          // 角色，继续向站台外侧移动并参与碰撞，避免下车流突然消失。
           passenger.routeProgress = 1;
           passenger.target = {
-            x: clamp(door.center.x, walkableBounds.x + passenger.radius, walkableBounds.x + walkableBounds.width - passenger.radius),
-            y: context.platformBounds.y + context.platformBounds.height + passenger.radius + 18,
+            x: passenger.position.x,
+            y: context.platformBounds.y + context.platformBounds.height
+              + Math.max(0, context.exitMargin ?? 0) + passenger.radius,
           };
+          alightingExited += 1;
         }
       } else {
-        advancePassenger(passenger, passenger.target, passenger.speed * dt, dt);
-        if (
-          passenger.position.y >= context.platformBounds.y + context.platformBounds.height - passenger.radius ||
-          distance(passenger.position, passenger.target) <= 0.001
-        ) {
+        advancePassenger(
+          passenger,
+          passenger.target,
+          moveSpeed * ALIGHTING_SPEED_MULTIPLIER * dt,
+          dt,
+        );
+        if (distance(passenger.position, passenger.target) <= 0.001) {
           passenger.role = 'exited';
           passenger.velocity = vec();
-          alightingExited += 1;
         }
       }
       continue;
@@ -435,7 +534,7 @@ export function updatePassengers(
         passenger.velocity = vec();
         // 等待时仍可在站台内做很小的避让，但不穿过门线。
         passenger.position = clampPointToRect(passenger.position, walkableBounds, passenger.radius);
-        passenger.position = keepOutsideRects(passenger.position, passenger.radius, blockedZones);
+        passenger.position = softPushOutsideRects(passenger.position, passenger.radius, blockedZones, dt);
         continue;
       }
       passenger.target = {
@@ -454,9 +553,9 @@ export function updatePassengers(
       } else {
         if (atBoardingPoint && context.boardingOpen) blockedAttempts += 1;
         // 接近门前航点也使用短暂加速，给角色留出完整的“走到门口→穿过门洞→进车厢”时间。
-        advancePassenger(passenger, passenger.target, passenger.speed * BOARDING_SPEED_MULTIPLIER * dt, dt);
+        advancePassenger(passenger, passenger.target, moveSpeed * BOARDING_SPEED_MULTIPLIER * dt, dt);
         passenger.position = clampPointToRect(passenger.position, walkableBounds, passenger.radius);
-        passenger.position = keepOutsideRects(passenger.position, passenger.radius, blockedZones);
+        passenger.position = softPushOutsideRects(passenger.position, passenger.radius, blockedZones, dt);
       }
       continue;
     }
@@ -464,6 +563,13 @@ export function updatePassengers(
     if (passenger.role === 'boarding') {
       const index = doorIndex.get(passenger.doorId ?? door.id) ?? 0;
       const boardingDoor = doorConfigById(context.doors, passenger.doorId ?? door.id) ?? door;
+      const boardingState = doorStateById(context.doorStates, boardingDoor.id);
+      if (!boardingState?.open || boardingState.blocked) {
+        // 提前关门事件已经把旧门封闭；没有可用的新门时也要原地暂停，
+        // 不能让 boarding 角色绕过门状态继续向车厢内部移动。
+        passenger.velocity = vec();
+        continue;
+      }
       // target 已在转为 boarding 时固定；缺失时重新生成一个确定位置。
       if (!Number.isFinite(passenger.target.x) || !Number.isFinite(passenger.target.y)) {
         passenger.target = enterTrainPoint(context.trainBounds, boardingDoor, index);
@@ -471,7 +577,7 @@ export function updatePassengers(
       advancePassenger(
         passenger,
         passenger.target,
-        passenger.speed * BOARDING_SPEED_MULTIPLIER * dt,
+        moveSpeed * BOARDING_SPEED_MULTIPLIER * dt,
         dt,
       );
       if (distance(passenger.position, passenger.target) <= 0.001) {

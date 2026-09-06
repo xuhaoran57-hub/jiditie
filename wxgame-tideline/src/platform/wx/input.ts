@@ -40,6 +40,11 @@ export interface TouchLevelHitArea {
   rect: Rect;
 }
 
+export interface TouchMenuHitArea {
+  id: string;
+  rect: Rect;
+}
+
 export interface TouchControlsLayout {
   joystickCenter: Vec2;
   joystickRadius: number;
@@ -48,9 +53,16 @@ export interface TouchControlsLayout {
   restartButtonRect?: Rect;
   doorHitAreas?: readonly TouchDoorHitArea[];
   levelHitAreas?: readonly TouchLevelHitArea[];
+  menuHitAreas?: readonly TouchMenuHitArea[];
+  appearanceHitAreas?: readonly TouchMenuHitArea[];
+  settingsHitAreas?: readonly TouchMenuHitArea[];
+  routeDropdownRect?: Rect;
+  routeListRect?: Rect;
+  pageBackRect?: Rect;
   resultRetryRect?: Rect;
   resultNextRect?: Rect;
   resultRouteRect?: Rect;
+  briefingConfirmRect?: Rect;
 }
 
 export type TouchCommand =
@@ -58,6 +70,13 @@ export type TouchCommand =
   | { type: 'restart' }
   | { type: 'select-door'; doorId: string }
   | { type: 'select-level'; levelId: string }
+  | { type: 'menu'; id: string }
+  | { type: 'toggle-route-menu' }
+  | { type: 'scroll-route'; delta: number }
+  | { type: 'confirm-start' }
+  | { type: 'back' }
+  | { type: 'select-appearance'; appearanceId: string }
+  | { type: 'toggle-setting'; setting: 'sound' | 'music' | 'vibration' }
   | { type: 'retry' }
   | { type: 'next-level' }
   | { type: 'route' };
@@ -127,9 +146,16 @@ function sameLayout(first: TouchControlsLayout, second: TouchControlsLayout): bo
     && sameRect(first.restartButtonRect, second.restartButtonRect)
     && sameAreas(first.doorHitAreas, second.doorHitAreas)
     && sameAreas(first.levelHitAreas, second.levelHitAreas)
+    && sameAreas(first.menuHitAreas, second.menuHitAreas)
+    && sameAreas(first.appearanceHitAreas, second.appearanceHitAreas)
+    && sameAreas(first.settingsHitAreas, second.settingsHitAreas)
+    && sameRect(first.routeDropdownRect, second.routeDropdownRect)
+    && sameRect(first.routeListRect, second.routeListRect)
+    && sameRect(first.pageBackRect, second.pageBackRect)
     && sameRect(first.resultRetryRect, second.resultRetryRect)
     && sameRect(first.resultNextRect, second.resultNextRect)
-    && sameRect(first.resultRouteRect, second.resultRouteRect);
+    && sameRect(first.resultRouteRect, second.resultRouteRect)
+    && sameRect(first.briefingConfirmRect, second.briefingConfirmRect);
 }
 
 /**
@@ -145,6 +171,10 @@ export class WxTouchInputAdapter {
   private guideQueued = false;
   private pendingDoorId: string | undefined;
   private commands: TouchCommand[] = [];
+  private routeTouchId: number | null = null;
+  private routeTouchStartY = 0;
+  private routeTouchLastY = 0;
+  private routeTouchLevelId: string | undefined;
   private _attached = false;
 
   private readonly startListener: WxTouchListener = (event) => this.handleTouchStart(event);
@@ -211,6 +241,8 @@ export class WxTouchInputAdapter {
     this.guideQueued = false;
     this.pendingDoorId = undefined;
     this.commands = [];
+    this.routeTouchId = null;
+    this.routeTouchLevelId = undefined;
   }
 
   handleTouchStart(event: WxTouchEventLike): void {
@@ -261,6 +293,41 @@ export class WxTouchInputAdapter {
         this.commands.push({ type: 'route' });
         continue;
       }
+      if (this.layout.briefingConfirmRect && hitTestRect(this.layout.briefingConfirmRect, position)) {
+        this.commands.push({ type: 'confirm-start' });
+        continue;
+      }
+      if (this.layout.pageBackRect && hitTestRect(this.layout.pageBackRect, position)) {
+        this.commands.push({ type: 'back' });
+        continue;
+      }
+      if (this.layout.routeDropdownRect && hitTestRect(this.layout.routeDropdownRect, position)) {
+        this.commands.push({ type: 'toggle-route-menu' });
+        continue;
+      }
+      if (this.layout.routeListRect && hitTestRect(this.layout.routeListRect, position)) {
+        const level = this.layout.levelHitAreas?.find((area) => hitTestRect(area.rect, position));
+        this.routeTouchId = point.identifier;
+        this.routeTouchStartY = position.y;
+        this.routeTouchLastY = position.y;
+        this.routeTouchLevelId = level?.id;
+        continue;
+      }
+      const menu = this.layout.menuHitAreas?.find((area) => hitTestRect(area.rect, position));
+      if (menu) {
+        this.commands.push({ type: 'menu', id: menu.id });
+        continue;
+      }
+      const appearance = this.layout.appearanceHitAreas?.find((area) => hitTestRect(area.rect, position));
+      if (appearance) {
+        this.commands.push({ type: 'select-appearance', appearanceId: appearance.id });
+        continue;
+      }
+      const setting = this.layout.settingsHitAreas?.find((area) => hitTestRect(area.rect, position));
+      if (setting) {
+        this.commands.push({ type: 'toggle-setting', setting: setting.id as 'sound' | 'music' | 'vibration' });
+        continue;
+      }
       const level = this.layout.levelHitAreas?.find((area) => hitTestRect(area.rect, position));
       if (level) {
         this.commands.push({ type: 'select-level', levelId: level.id });
@@ -275,6 +342,13 @@ export class WxTouchInputAdapter {
   }
 
   handleTouchMove(event: WxTouchEventLike): void {
+    const routePoint = this.routeTouchId === null
+      ? undefined
+      : eventPoints(event).find((item) => item.identifier === this.routeTouchId);
+    if (routePoint) {
+      const position = touchPointPosition(routePoint);
+      if (position) this.routeTouchLastY = position.y;
+    }
     if (this.joystickId === null) return;
     const point = eventPoints(event).find((item) => item.identifier === this.joystickId);
     const position = point ? touchPointPosition(point) : undefined;
@@ -282,10 +356,21 @@ export class WxTouchInputAdapter {
   }
 
   handleTouchEnd(event: WxTouchEventLike): void {
+    if (this.routeTouchId !== null && containsIdentifier(event.changedTouches, this.routeTouchId)) {
+      const delta = this.routeTouchStartY - this.routeTouchLastY;
+      if (Math.abs(delta) >= 8) this.commands.push({ type: 'scroll-route', delta });
+      else if (this.routeTouchLevelId) this.commands.push({ type: 'select-level', levelId: this.routeTouchLevelId });
+      this.routeTouchId = null;
+      this.routeTouchLevelId = undefined;
+    }
     this.releaseIfMissing(event);
   }
 
   handleTouchCancel(event: WxTouchEventLike): void {
+    if (this.routeTouchId !== null && containsIdentifier(event.changedTouches, this.routeTouchId)) {
+      this.routeTouchId = null;
+      this.routeTouchLevelId = undefined;
+    }
     this.releaseIfMissing(event);
   }
 

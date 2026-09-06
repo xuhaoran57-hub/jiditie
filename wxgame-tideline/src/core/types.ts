@@ -37,7 +37,7 @@ export type CarriageTheme = (typeof CARRIAGE_THEMES)[number];
  * M5 内容事件只描述规则参数，不携带任何 Canvas/微信对象。
  * 事件按关卡配置的数据驱动，便于后续扩展而不改状态机接口。
  */
-export const LEVEL_EVENT_KINDS = ['rain', 'door-change', 'luggage-cart'] as const;
+export const LEVEL_EVENT_KINDS = ['rain', 'door-close', 'luggage-cart', 'crowd-surge'] as const;
 
 export type LevelEventKind = (typeof LEVEL_EVENT_KINDS)[number];
 
@@ -89,11 +89,15 @@ export interface LevelEventConfig {
   description: string;
   /** 雨天事件把站台左右各收窄多少逻辑像素。 */
   horizontalInset?: number;
-  /** 临时换门事件的旧门与新推荐门。旧门会暂时不可用。 */
+  /** 提前关门事件的旧门与替代通道。旧门会暂时不可用。 */
   fromDoorId?: string;
   toDoorId?: string;
+  /** 提前关门前的可读预警时长；预警期间旧门仍保持开放。 */
+  warningDuration?: number;
   /** 行李车事件占用的站台区域。 */
   zone?: Rect;
+  /** 快速人流事件对乘客移动速度的倍率。 */
+  speedMultiplier?: number;
 }
 
 export interface ActiveEvent {
@@ -104,10 +108,14 @@ export interface ActiveEvent {
   startedAt: number;
   endsAt: number;
   remaining: number;
+  /** 事件尚处于预警阶段时使用；超过该时刻才真正改变规则。 */
+  warningUntil?: number;
+  phase?: 'warning' | 'active';
   horizontalInset?: number;
   fromDoorId?: string;
   toDoorId?: string;
   zone?: Rect;
+  speedMultiplier?: number;
 }
 
 export interface GuideConfig {
@@ -137,6 +145,14 @@ export interface PlayerConfig {
   staminaRegen: number;
 }
 
+export type LevelObjective =
+  | { id: 'no-collision'; label: string }
+  | { id: 'alighting-rate'; label: string; minRatio: number }
+  | { id: 'finish-time'; label: string; minRemaining: number }
+  | { id: 'guide-limit'; label: string; maxUses: number }
+  | { id: 'courtesy-score'; label: string; minScore: number }
+  | { id: 'stamina'; label: string; minRatio: number };
+
 export interface LevelConfig {
   id: string;
   name: string;
@@ -155,6 +171,8 @@ export interface LevelConfig {
   carriageCapacity: number;
   recommendedDoorId: string;
   guide: GuideConfig;
+  /** 每关最多三个可重玩的三星目标。 */
+  objectives?: readonly LevelObjective[];
   /** 一关最多放置一个主要事件；规则层仍支持多个按时间顺序触发。 */
   events?: readonly LevelEventConfig[];
 }
@@ -173,7 +191,7 @@ export interface Passenger {
   desiredDoorId: string;
   doorId?: string;
   groupId?: string;
-  /** 0 表示尚未走完下车门口这个航点，1 表示已朝站台出口移动。 */
+  /** 0 表示尚未穿过下车门洞，1 表示已穿过门洞并完成下车。 */
   routeProgress: number;
   guidedUntil: number;
 }
@@ -214,7 +232,6 @@ export interface SimulationMetrics {
   boardingTotal: number;
   boarded: number;
   guideUses: number;
-  doorSwitches: number;
   staminaSpent: number;
   lateBoardingAttempts: number;
   /** 结算瞬间尚未消耗的开门时间；失败时通常为 0。 */
@@ -234,8 +251,8 @@ export interface ScoreResult {
   efficiency: number;
   courtesy: number;
   stamina: number;
-  route: number;
   total: number;
+  stars: 0 | 1 | 2 | 3;
   medal: 'none' | 'bronze' | 'silver' | 'gold';
 }
 
@@ -253,7 +270,7 @@ export interface GameState {
   outcome: GameOutcome | null;
   score: ScoreResult | null;
   events: EventRecord[];
-  /** 当前生效的推荐入口；临时换门事件期间会切换。 */
+  /** 关卡配置中的默认入口提示；实际通行只取决于门是否开放。 */
   recommendedDoorId: string;
   /** 当前正在影响规则的内容事件；没有事件时为 null。 */
   activeEvent: ActiveEvent | null;
@@ -295,6 +312,13 @@ export interface PassengerUpdateContext {
   carriageCapacity: number;
   boardingOpen: boolean;
   alightingOpen: boolean;
+  /** 提前关门事件当前暂时封闭的门，以及 NPC 应改走的门。 */
+  blockedDoorId?: string;
+  rerouteDoorId?: string;
+  /** 当前事件对乘客移动速度的倍率，默认为 1。 */
+  speedMultiplier?: number;
+  /** 下车客走出站台边界前额外保留的距离。 */
+  exitMargin?: number;
 }
 
 export interface PassengerUpdateResult {
@@ -315,7 +339,9 @@ export interface SaveData {
   version: number;
   unlockedLevelIds: string[];
   bestScores: Record<string, number>;
+  bestStars: Record<string, number>;
   achievements: string[];
+  appearanceId: string;
   settings: SaveSettings;
   stats: {
     plays: number;

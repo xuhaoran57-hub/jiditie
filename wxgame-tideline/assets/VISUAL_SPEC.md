@@ -19,7 +19,7 @@
 | accent | `#42d6c5` | 主交互、成功 |
 | safe | `#67e0be` | 安全区、疏导反馈 |
 | warning | `#ef6b78` | 关门警告、阻塞门 |
-| gold | `#f5cb66` | 倒计时、推荐入口 |
+| gold | `#f5cb66` | 倒计时、开放车门提示 |
 | text | `#eef7ff` | 主文字 |
 | muted | `#9fb2ca` | 辅助文字 |
 

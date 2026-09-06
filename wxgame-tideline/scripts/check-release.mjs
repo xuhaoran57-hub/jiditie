@@ -13,6 +13,7 @@ const DEFAULT_LIMITS = Object.freeze({
   packageBytes: 4 * 1024 * 1024,
   distBytes: 1 * 1024 * 1024,
   wavBytes: 256 * 1024,
+  loopWavBytes: 512 * 1024,
   svgBytes: 128 * 1024,
 });
 
@@ -28,6 +29,9 @@ const REQUIRED_FILES = [
   'assets/generated/tideline-player-sprite.svg',
   'assets/generated/tideline-player-sprite.png',
   'assets/generated/tideline-passenger-regular-sprite.png',
+  'assets/generated/tideline-passenger-fast-sprite.png',
+  'assets/generated/tideline-passenger-atlas.svg',
+  'assets/generated/tideline-passenger-atlas.png',
   'assets/audio/tideline-loop.wav',
   'assets/audio/ui-guide.wav',
   'assets/audio/ui-success.wav',
@@ -66,6 +70,7 @@ function parseArgs(argv) {
       packageBytes: readNumber('max-package-kb', DEFAULT_LIMITS.packageBytes / 1024) * 1024,
       distBytes: readNumber('max-dist-kb', DEFAULT_LIMITS.distBytes / 1024) * 1024,
       wavBytes: readNumber('max-wav-kb', DEFAULT_LIMITS.wavBytes / 1024) * 1024,
+      loopWavBytes: readNumber('max-loop-wav-kb', DEFAULT_LIMITS.loopWavBytes / 1024) * 1024,
       svgBytes: readNumber('max-svg-kb', DEFAULT_LIMITS.svgBytes / 1024) * 1024,
     },
   };
@@ -255,8 +260,13 @@ function checkPackageSize(report, options) {
   for (const file of releaseFiles) {
     const extension = extname(file).toLowerCase();
     const size = byteSize(file);
-    if (extension === '.wav' && size > options.limits.wavBytes) {
-      pushIssue(report, 'error', 'wav-size', `${relativePath(file)} 为 ${formatBytes(size)}，超过 ${formatBytes(options.limits.wavBytes)} 上限`);
+    if (extension === '.wav') {
+      const wavLimit = normalizePath(relativePath(file)) === 'assets/audio/tideline-loop.wav'
+        ? options.limits.loopWavBytes
+        : options.limits.wavBytes;
+      if (size > wavLimit) {
+        pushIssue(report, 'error', 'wav-size', `${relativePath(file)} 为 ${formatBytes(size)}，超过 ${formatBytes(wavLimit)} 上限`);
+      }
     }
     if (extension === '.svg' && size > options.limits.svgBytes) {
       pushIssue(report, 'error', 'svg-size', `${relativePath(file)} 为 ${formatBytes(size)}，超过 ${formatBytes(options.limits.svgBytes)} 上限`);

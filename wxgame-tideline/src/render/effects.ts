@@ -139,7 +139,14 @@ function drawCollisionFlash(context: RenderContext, state: GameState, age: numbe
 }
 
 function drawSafeZonePulse(context: RenderContext, level: LevelConfig, state: GameState): void {
-  const door = level.doors.find((item) => item.id === state.player.selectedDoorId);
+  const door = level.doors.find((item) => {
+    const runtime = state.doors.find((entry) => entry.id === item.id);
+    return runtime?.open && !runtime.blocked
+      && state.player.position.x >= item.safeZone.x
+      && state.player.position.x <= item.safeZone.x + item.safeZone.width
+      && state.player.position.y >= item.safeZone.y
+      && state.player.position.y <= item.safeZone.y + item.safeZone.height;
+  });
   if (!door || !state.player.inSafeZone) return;
   const { ctx } = context;
   const pulse = 1 + (Math.sin(state.elapsed * 5) + 1) * 0.08;

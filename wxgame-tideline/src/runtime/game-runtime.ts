@@ -1,15 +1,19 @@
 import {
   GameSimulation,
-  MVP_LEVELS,
+  CAMPAIGN_LEVELS,
   migrateSave,
+  unlockedAppearanceIds,
+  isAppearanceUnlocked,
+  setAppearance,
   unlockLevel,
   updateBestScore,
+  updateBestStars,
 } from '../core/index.ts';
 import type {
   EventRecord,
   GameState,
   LevelConfig,
-  Rect,
+  SaveSettings,
   SaveData,
   SimulationInput,
 } from '../core/types.ts';
@@ -41,7 +45,12 @@ import type {
 } from '../platform/wx/index.ts';
 import {
   GameRenderer,
+  menuButtonRect,
+  pageBackRect,
   routeCardRect,
+  routeListRect,
+  routeListCardRect,
+  routeDropdownRect,
   screenDirectionToWorld,
 } from '../render/index.ts';
 import type { RenderOptions } from '../render/index.ts';
@@ -61,7 +70,7 @@ export interface WxGameApi
   cancelAnimationFrame?: (handle: number) => void;
 }
 
-export type RuntimeScreen = 'route' | 'game' | 'result';
+export type RuntimeScreen = 'home' | 'route' | 'briefing' | 'game' | 'result' | 'achievements' | 'appearance' | 'settings';
 
 export interface RuntimeScheduler {
   request(callback: (timestamp: number) => void): unknown;
@@ -115,6 +124,12 @@ export interface RuntimeSnapshot {
   selectedLevelId: string;
   unlockedLevelIds: string[];
   bestScores: Record<string, number>;
+  bestStars: Record<string, number>;
+  achievements: string[];
+  appearanceId: string;
+  unlockedAppearanceIds: string[];
+  routeMenuExpanded: boolean;
+  routeScrollOffset: number;
   paused: boolean;
   running: boolean;
   state: GameState | null;
@@ -171,14 +186,6 @@ function safeIndex(value: number, length: number): number {
   return Math.min(length - 1, Math.max(0, Math.floor(value)));
 }
 
-function unionRect(first: Rect, second: Rect, padding = 0): Rect {
-  const left = Math.min(first.x, second.x) - padding;
-  const top = Math.min(first.y, second.y) - padding;
-  const right = Math.max(first.x + first.width, second.x + second.width) + padding;
-  const bottom = Math.max(first.y + first.height, second.y + second.height) + padding;
-  return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-}
-
 export class GameRuntime {
   readonly levels: readonly LevelConfig[];
   readonly loop: FixedTimestepLoop;
@@ -194,8 +201,10 @@ export class GameRuntime {
   private readonly now: () => number;
   private readonly baseSeed: number | string;
   private readonly audioSources: RuntimeAudioSources;
-  private screenValue: RuntimeScreen = 'route';
+  private screenValue: RuntimeScreen = 'home';
   private selectedLevelIndexValue = 0;
+  private routeMenuExpanded = false;
+  private routeScrollOffset = 0;
   private saveValue: SaveData;
   private simulation?: GameSimulation;
   private currentSeed: number | string;
@@ -235,7 +244,7 @@ export class GameRuntime {
       ? { ...second, api: first }
       : first;
     const api = options.api ?? options.wx;
-    this.levels = options.levels && options.levels.length > 0 ? options.levels : MVP_LEVELS;
+    this.levels = options.levels && options.levels.length > 0 ? options.levels : CAMPAIGN_LEVELS;
     this.baseSeed = options.seed ?? DEFAULT_SEED;
     this.now = options.now ?? (() => Date.now());
     this.audioSources = {
@@ -431,11 +440,22 @@ export class GameRuntime {
     this.render();
   }
 
-  /** 选择并开始一个已解锁关卡。参数可以是路线索引或关卡 id。 */
+  /** 选择一个已解锁关卡，先展示三星目标，确认后才开始。 */
   selectLevel(levelOrIndex: string | number): boolean {
     const index = this.resolveLevelIndex(levelOrIndex);
     if (index < 0 || !this.isUnlocked(this.levels[index]?.id)) return false;
-    return this.startLevelAt(index);
+    this.selectedLevelIndexValue = index;
+    this.screenValue = 'briefing';
+    this.simulation = undefined;
+    this.previewState = new GameSimulation(this.currentLevel, this.seedForLevel(this.currentLevel.id)).snapshot();
+    this.updateInputLayout();
+    this.render();
+    return true;
+  }
+
+  confirmStart(): boolean {
+    if (this.screenValue !== 'briefing') return false;
+    return this.startLevelAt(this.selectedLevelIndexValue);
   }
 
   startLevel(levelOrIndex: string | number = this.selectedLevelIndexValue): boolean {
@@ -461,11 +481,13 @@ export class GameRuntime {
     if (nextIndex >= this.levels.length) return false;
     const nextId = this.levels[nextIndex]?.id;
     if (!nextId || !this.isUnlocked(nextId)) return false;
-    return this.startLevelAt(nextIndex);
+    return this.selectLevel(nextIndex);
   }
 
   backToRoute(): void {
     this.screenValue = 'route';
+    this.routeMenuExpanded = false;
+    this.routeScrollOffset = 0;
     this.simulation = undefined;
     this.audioEventCursor = 0;
     this.resultRecorded = false;
@@ -476,6 +498,75 @@ export class GameRuntime {
     this.syncLoopPause();
     this.updateInputLayout();
     this.render();
+  }
+
+  backToHome(): void {
+    this.screenValue = 'home';
+    this.routeMenuExpanded = false;
+    this.simulation = undefined;
+    this.audioEventCursor = 0;
+    this.resultRecorded = false;
+    this.userPaused = false;
+    this.input.reset();
+    this.loop.reset();
+    this.previewState = new GameSimulation(this.currentLevel, this.seedForLevel(this.currentLevel.id)).snapshot();
+    this.syncLoopPause();
+    this.updateInputLayout();
+    this.render();
+  }
+
+  openRoute(): void {
+    this.screenValue = 'route';
+    this.routeMenuExpanded = false;
+    this.routeScrollOffset = 0;
+    this.updateInputLayout();
+    this.render();
+  }
+
+  openAchievements(): void {
+    this.screenValue = 'achievements';
+    this.updateInputLayout();
+    this.render();
+  }
+
+  openAppearance(): void {
+    this.screenValue = 'appearance';
+    this.updateInputLayout();
+    this.render();
+  }
+
+  openSettings(): void {
+    this.screenValue = 'settings';
+    this.updateInputLayout();
+    this.render();
+  }
+
+  toggleRouteMenu(): boolean {
+    if (this.screenValue !== 'route') return false;
+    this.routeMenuExpanded = !this.routeMenuExpanded;
+    this.updateInputLayout();
+    this.render();
+    return this.routeMenuExpanded;
+  }
+
+  setAppearance(appearanceId: string): boolean {
+    if (this.screenValue !== 'appearance') return false;
+    if (!isAppearanceUnlocked(this.saveValue, appearanceId)) return false;
+    this.saveValue = setAppearance(this.saveValue, appearanceId);
+    this.storage.save(this.saveValue);
+    this.render();
+    return true;
+  }
+
+  toggleSetting(setting: 'sound' | 'music' | 'vibration'): boolean {
+    if (setting === 'sound') this.setSoundEnabled(!this.saveValue.settings.soundEnabled);
+    else if (setting === 'music') this.setMusicEnabled(!this.saveValue.settings.musicEnabled);
+    else {
+      this.saveValue = migrateSave({ ...this.saveValue, settings: { ...this.saveValue.settings, vibrationEnabled: !this.saveValue.settings.vibrationEnabled } });
+      this.storage.save(this.saveValue);
+      this.render();
+    }
+    return true;
   }
 
   returnToRoute(): void {
@@ -542,6 +633,12 @@ export class GameRuntime {
       selectedLevelId: this.currentLevel.id,
       unlockedLevelIds: this.unlockedLevelIds(),
       bestScores: { ...this.saveValue.bestScores },
+      bestStars: { ...this.saveValue.bestStars },
+      achievements: [...this.saveValue.achievements],
+      appearanceId: this.saveValue.appearanceId,
+      unlockedAppearanceIds: unlockedAppearanceIds(this.saveValue),
+      routeMenuExpanded: this.routeMenuExpanded,
+      routeScrollOffset: this.routeScrollOffset,
       paused: this.paused,
       running: this.runningValue,
       state: this.simulation ? this.simulation.snapshot() : null,
@@ -607,6 +704,7 @@ export class GameRuntime {
     this.audioEventCursor = 0;
     this.previewState = this.simulation.snapshot();
     this.screenValue = 'game';
+    this.routeMenuExpanded = false;
     this.userPaused = false;
     this.resultRecorded = false;
     this.input.reset();
@@ -647,6 +745,44 @@ export class GameRuntime {
         case 'route':
           this.backToRoute();
           flowChanged = true;
+          break;
+        case 'back':
+          if (this.screenValue === 'route' || this.screenValue === 'briefing' || this.screenValue === 'achievements' || this.screenValue === 'appearance' || this.screenValue === 'settings') {
+            this.backToHome();
+            flowChanged = true;
+          }
+          break;
+        case 'toggle-route-menu':
+          flowChanged = this.toggleRouteMenu() || flowChanged;
+          break;
+        case 'confirm-start':
+          flowChanged = this.confirmStart() || flowChanged;
+          break;
+        case 'scroll-route':
+          if (this.screenValue === 'route') {
+            const list = routeListRect(this.renderer.context.layout.viewport);
+            const visibleCount = this.unlockedLevelIds().length;
+            const cardHeight = this.renderer.context.layout.viewport.contentRect.width >= this.renderer.context.layout.viewport.contentRect.height ? 66 : 74;
+            const contentHeight = Math.max(0, visibleCount * (cardHeight + 10) - 10);
+            this.routeScrollOffset = Math.max(0, Math.min(Math.max(0, contentHeight - list.height), this.routeScrollOffset + command.delta));
+            this.render();
+            flowChanged = true;
+          }
+          break;
+        case 'menu':
+          if (this.screenValue === 'home') {
+            if (command.id === 'start') this.openRoute();
+            else if (command.id === 'achievements') this.openAchievements();
+            else if (command.id === 'appearance') this.openAppearance();
+            else if (command.id === 'settings') this.openSettings();
+            flowChanged = true;
+          }
+          break;
+        case 'select-appearance':
+          flowChanged = this.setAppearance(command.appearanceId) || flowChanged;
+          break;
+        case 'toggle-setting':
+          flowChanged = this.toggleSetting(command.setting) || flowChanged;
           break;
         case 'select-level':
           if (this.screenValue === 'route') flowChanged = this.selectLevel(command.levelId) || flowChanged;
@@ -705,6 +841,7 @@ export class GameRuntime {
     this.resultRecorded = true;
     const level = this.currentLevel;
     let next = updateBestScore(this.saveValue, level.id, state.score?.total ?? 0);
+    next = updateBestStars(next, level.id, state.score?.stars ?? 0);
     next.stats.totalGuides += state.metrics.guideUses;
     if (state.outcome === 'success') {
       next.stats.clears += 1;
@@ -773,6 +910,14 @@ export class GameRuntime {
       levels: this.levels,
       unlockedLevelIds: this.unlockedLevelIds(),
       selectedLevelIndex: this.selectedLevelIndexValue,
+      bestScores: this.saveValue.bestScores,
+      bestStars: this.saveValue.bestStars,
+      achievements: this.saveValue.achievements,
+      appearanceId: this.saveValue.appearanceId,
+      unlockedAppearanceIds: unlockedAppearanceIds(this.saveValue),
+      settings: this.saveValue.settings,
+      routeMenuExpanded: this.routeMenuExpanded,
+      routeScrollOffset: this.routeScrollOffset,
     };
     this.renderer.render(state, level, options);
     this.updateInputLayout();
@@ -811,20 +956,48 @@ export class GameRuntime {
       guideButtonRect: { x: -1000, y: -1000, width: 1, height: 1 },
     };
 
-    if (this.screenValue === 'route') {
-      base.levelHitAreas = this.levels.map((level, index) => ({
-        id: level.id,
-        rect: routeCardRect(layout.viewport, index),
-      }));
+    if (this.screenValue === 'home') {
+      base.menuHitAreas = [
+        { id: 'start', rect: menuButtonRect(layout.viewport, 0, 4) },
+        { id: 'achievements', rect: menuButtonRect(layout.viewport, 1, 4) },
+        { id: 'appearance', rect: menuButtonRect(layout.viewport, 2, 4) },
+        { id: 'settings', rect: menuButtonRect(layout.viewport, 3, 4) },
+      ];
+    } else if (this.screenValue === 'route') {
+      base.pageBackRect = pageBackRect(layout.viewport);
+      base.routeListRect = routeListRect(layout.viewport);
+      const unlocked = new Set(this.unlockedLevelIds());
+      const visibleLevels = this.levels.filter((level) => unlocked.has(level.id));
+      base.levelHitAreas = visibleLevels.map((level, index) => ({
+          id: level.id,
+          rect: routeListCardRect(layout.viewport, index, this.routeScrollOffset),
+        }));
+    } else if (this.screenValue === 'briefing') {
+      base.pageBackRect = pageBackRect(layout.viewport);
+      base.briefingConfirmRect = layout.briefingConfirmRect;
+    } else if (this.screenValue === 'achievements' || this.screenValue === 'settings') {
+      base.pageBackRect = pageBackRect(layout.viewport);
+      if (this.screenValue === 'settings') {
+        base.settingsHitAreas = [
+          { id: 'sound', rect: menuButtonRect(layout.viewport, 0, 3) },
+          { id: 'music', rect: menuButtonRect(layout.viewport, 1, 3) },
+          { id: 'vibration', rect: menuButtonRect(layout.viewport, 2, 3) },
+        ];
+      }
+    } else if (this.screenValue === 'appearance') {
+      base.pageBackRect = pageBackRect(layout.viewport);
+      const unlocked = new Set(unlockedAppearanceIds(this.saveValue));
+      base.appearanceHitAreas = ['default', 'seafoam', 'sunset', 'night']
+        .filter((id) => unlocked.has(id))
+        .map((id) => ({
+          id,
+          rect: menuButtonRect(layout.viewport, ['default', 'seafoam', 'sunset', 'night'].indexOf(id), 4),
+        }));
     } else if (this.screenValue === 'game') {
       base.joystickCenter = layout.joystickCenter;
       base.joystickRadius = layout.joystickRadius;
       base.guideButtonRect = layout.guideButtonRect;
       base.pauseButtonRect = layout.pauseButtonRect;
-      base.doorHitAreas = this.currentLevel.doors.map((door) => ({
-        id: door.id,
-        rect: this.screenRectFromWorld(unionRect(door.entryZone, door.safeZone, 8)),
-      }));
     } else {
       base.resultRetryRect = layout.resultRetryRect;
       base.resultNextRect = layout.resultNextRect;
@@ -833,17 +1006,6 @@ export class GameRuntime {
     this.input.setLayout(base);
   }
 
-  private screenRectFromWorld(rect: Rect): Rect {
-    const context = this.renderer.context;
-    const topLeft = context.worldToScreen({ x: rect.x, y: rect.y });
-    const bottomRight = context.worldToScreen({ x: rect.x + rect.width, y: rect.y + rect.height });
-    return {
-      x: Math.min(topLeft.x, bottomRight.x),
-      y: Math.min(topLeft.y, bottomRight.y),
-      width: Math.abs(bottomRight.x - topLeft.x),
-      height: Math.abs(bottomRight.y - topLeft.y),
-    };
-  }
 }
 
 export function createGameRuntime(options: GameRuntimeOptions): GameRuntime;

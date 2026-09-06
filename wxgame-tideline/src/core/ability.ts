@@ -12,6 +12,8 @@ import {
 } from './vector.ts';
 
 const ACTIVE_PHASES = new Set(['positioning', 'exiting', 'boarding', 'warning']);
+const GUIDE_MAX_TARGETS = 2;
+const GUIDE_COOLDOWN = 1;
 
 function clampGuidedPosition(passenger: Passenger, level: LevelConfig): void {
   const minX = level.platformBounds.x + passenger.radius;
@@ -46,26 +48,35 @@ export function useGuideAbility(
     })
     .filter((item) => item.distanceToPlayer <= level.guide.range && item.front)
     .sort((a, b) => a.distanceToPlayer - b.distanceToPlayer || a.passenger.id.localeCompare(b.passenger.id))
-    .slice(0, Math.max(0, Math.floor(level.guide.maxTargets)));
+    .slice(0, Math.min(GUIDE_MAX_TARGETS, Math.max(0, Math.floor(level.guide.maxTargets))));
 
   if (candidates.length === 0) return { ...empty, reason: 'no-target' };
 
   const side = perpendicular(facing);
   const affectedPassengerIds: string[] = [];
   candidates.forEach(({ passenger }, index) => {
+    const door = level.doors.find((item) => item.id === passenger.desiredDoorId) ?? level.doors[0];
     const sign = index % 2 === 0 ? 1 : -1;
     const offset = scale(side, sign * level.guide.sideOffset);
+    const beforeDoorDistance = door ? Math.abs(passenger.position.x - door.center.x) : 0;
+    const afterDoorDistance = door ? Math.abs(passenger.position.x + offset.x - door.center.x) : beforeDoorDistance;
+    const advancesFlow = afterDoorDistance < beforeDoorDistance - 0.5;
     passenger.position = add(passenger.position, offset);
     passenger.target = add(passenger.target, offset);
     passenger.guidedUntil = now + Math.max(0, level.guide.effectDuration);
     passenger.emotion = 'relieved';
     clampGuidedPosition(passenger, level);
     affectedPassengerIds.push(passenger.id);
-    state.metrics.courtesyPoints += passenger.role === 'alighting' ? 2 : 1;
+    const baseCourtesy = advancesFlow
+      ? (passenger.role === 'alighting' ? 2 : 1)
+      : (passenger.role === 'alighting' ? -2 : -1);
+    // group 代表老人/儿童同行的敏感人流，主动拨动这类乘客会额外降低礼让值。
+    const sensitivePenalty = passenger.kind === 'group' ? -3 : 0;
+    state.metrics.courtesyPoints += baseCourtesy + sensitivePenalty;
   });
 
   state.player.stamina = clamp(state.player.stamina - level.guide.cost, 0, state.player.maxStamina);
-  state.player.abilityCooldown = Math.max(0, level.guide.cooldown);
+  state.player.abilityCooldown = GUIDE_COOLDOWN;
   state.player.guideUses += 1;
   state.metrics.guideUses += 1;
   state.metrics.staminaSpent += level.guide.cost;

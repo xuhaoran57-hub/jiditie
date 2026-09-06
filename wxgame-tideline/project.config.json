@@ -1,7 +1,13 @@
 {
-  "description": "潮汐线：赶上这班车——湾城虚构线路微信小游戏",
+  "description": "挤上这班车——潮汐线湾城通勤挑战微信小游戏",
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      { "type": "folder", "value": "references" },
+      { "type": "folder", "value": "node_modules" },
+      { "type": "folder", "value": "scripts" },
+      { "type": "folder", "value": "src" },
+      { "type": "folder", "value": "tests" }
+    ],
     "include": []
   },
   "setting": {

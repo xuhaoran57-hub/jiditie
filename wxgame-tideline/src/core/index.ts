@@ -10,4 +10,5 @@ export * from './crowd.ts';
 export * from './ability.ts';
 export * from './score.ts';
 export * from './save-schema.ts';
+export * from './appearance.ts';
 export * from './simulation.ts';

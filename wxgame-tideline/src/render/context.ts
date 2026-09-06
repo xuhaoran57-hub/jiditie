@@ -97,6 +97,7 @@ export interface RenderLayout {
   resultRetryRect: Rect;
   resultNextRect: Rect;
   resultRouteRect: Rect;
+  briefingConfirmRect: Rect;
   joystickCenter: Vec2;
   joystickRadius: number;
   guideButtonRect: Rect;
@@ -311,6 +312,12 @@ export function createRenderLayout(
     width: resultButtonWidth,
     height: resultButtonHeight,
   };
+  const briefingConfirmRect: Rect = {
+    x: content.x + (content.width - Math.min(220, content.width - 40)) / 2,
+    y: content.y + content.height * 0.78,
+    width: Math.min(220, content.width - 40),
+    height: 44,
+  };
   const joystickRadius = clamp(Math.min(content.width, content.height) * 0.105, 34, 52);
   const joystickCenter = {
     x: content.x + joystickRadius + 22,
@@ -339,6 +346,7 @@ export function createRenderLayout(
     resultRetryRect,
     resultNextRect,
     resultRouteRect,
+    briefingConfirmRect,
     joystickCenter,
     joystickRadius,
     guideButtonRect,
@@ -349,7 +357,7 @@ export function createRenderLayout(
  * 路线页卡片的几何定义。canvas-ui 和微信触摸适配器都调用同一个函数，
  * 这样安全区、窄屏和 DPR 变化时不会出现“看得到但点不到”。
  */
-export function routeCardRect(viewport: ViewportMetrics, index: number): Rect {
+export function routeCardRect(viewport: ViewportMetrics, index: number, levelCount = 3): Rect {
   const content = viewport.contentRect;
   const safeIndex = Number.isFinite(index) ? Math.max(0, Math.floor(index)) : 0;
   const landscape = content.width >= content.height;
@@ -360,7 +368,8 @@ export function routeCardRect(viewport: ViewportMetrics, index: number): Rect {
   const top = landscape
     ? content.y + clamp(content.height * 0.24, 88, 104)
     : content.y + 122;
-  const maxRows = Math.ceil(3 / columns);
+  const safeLevelCount = Number.isFinite(levelCount) ? Math.max(1, Math.floor(levelCount)) : 3;
+  const maxRows = Math.ceil(safeLevelCount / columns);
   const availableHeight = content.height - (top - content.y) - 24 - gap * Math.max(0, maxRows - 1);
   const cardHeight = landscape
     ? Math.max(1, Math.min(104, availableHeight / maxRows))
@@ -377,6 +386,60 @@ export function routeCardRect(viewport: ViewportMetrics, index: number): Rect {
     width: cardWidth,
     height: cardHeight,
   };
+}
+
+export function routeDropdownRect(viewport: ViewportMetrics): Rect {
+  const content = viewport.contentRect;
+  const landscape = content.width >= content.height;
+  const width = Math.min(landscape ? 360 : 300, Math.max(0, content.width - 32));
+  return {
+    x: content.x + (content.width - width) / 2,
+    y: content.y + (landscape ? 64 : 94),
+    width,
+    height: landscape ? 20 : 28,
+  };
+}
+
+export function routeListRect(viewport: ViewportMetrics): Rect {
+  const content = viewport.contentRect;
+  const landscape = content.width >= content.height;
+  const y = content.y + (landscape ? 92 : 132);
+  return { x: content.x + 16, y, width: Math.max(0, content.width - 32), height: Math.max(1, content.height - (y - content.y) - 18) };
+}
+
+export function routeListCardRect(viewport: ViewportMetrics, index: number, scrollOffset = 0): Rect {
+  const list = routeListRect(viewport);
+  const gap = 10;
+  const height = viewport.contentRect.width >= viewport.contentRect.height ? 66 : 74;
+  return { x: list.x, y: list.y + Math.max(0, Math.floor(index)) * (height + gap) - Math.max(0, scrollOffset), width: list.width, height };
+}
+
+export function menuButtonRect(viewport: ViewportMetrics, index: number, count = 4): Rect {
+  const content = viewport.contentRect;
+  const landscape = content.width >= content.height;
+  const safeIndex = Math.max(0, Math.floor(Number.isFinite(index) ? index : 0));
+  const columns = landscape && content.width >= 560 ? 2 : 1;
+  const gap = landscape ? 14 : 12;
+  const width = landscape
+    ? Math.min(300, Math.max(0, (content.width - 32 - gap * (columns - 1)) / columns))
+    : Math.min(300, Math.max(0, content.width - 32));
+  const height = landscape ? 54 : 52;
+  const rows = Math.max(1, Math.ceil(Math.max(1, count) / columns));
+  const totalWidth = width * columns + gap * (columns - 1);
+  const top = content.y + (landscape ? 100 : 132);
+  const row = Math.floor(safeIndex / columns);
+  const column = safeIndex % columns;
+  return {
+    x: content.x + (content.width - totalWidth) / 2 + column * (width + gap),
+    y: top + row * (height + gap),
+    width,
+    height,
+  };
+}
+
+export function pageBackRect(viewport: ViewportMetrics): Rect {
+  const content = viewport.contentRect;
+  return { x: content.x + 16, y: content.y + 14, width: 68, height: 30 };
 }
 
 export class RenderContext {

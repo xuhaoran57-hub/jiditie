@@ -3,7 +3,7 @@ import { clamp, normalize } from '../core/vector.ts';
 import { fillRoundRect, RenderContext, strokeRoundRect } from './context.ts';
 import { TIDELINE_TOKENS } from './design-tokens.ts';
 import type { PlayerSpriteAsset } from './player-sprite.ts';
-import type { PassengerSpriteAsset } from './passenger-sprite.ts';
+import { passengerSpriteFrame, type PassengerSpriteAsset } from './passenger-sprite.ts';
 
 interface CharacterPalette {
   shirt: string;
@@ -149,11 +149,23 @@ export const NPC_VISUAL_PROFILES: Readonly<Record<PassengerKind, NpcVisualProfil
 // 横屏舞台会把规则世界压到较薄的纵向区域。角色补回纵向比例后，
 // 仍需用更小的统一视觉尺寸，才能和横屏车门/车厢的实际像素高度匹配。
 const LANDSCAPE_ACTOR_SCALE = 0.48;
+const WALK_FRAME_SEQUENCE = [0, 1, 2, 1] as const;
 
 function actorVisualScale(context: RenderContext, baseScale: number): number {
   return context.layout.orientation === 'landscape'
     ? baseScale * LANDSCAPE_ACTOR_SCALE
     : baseScale;
+}
+
+function landscapeYCompensation(context: RenderContext): number {
+  if (context.layout.orientation !== 'landscape') return 1;
+  const scaleX = Number.isFinite(context.layout.worldScaleX)
+    ? Math.abs(context.layout.worldScaleX)
+    : Math.abs(context.layout.worldScale);
+  const scaleY = Number.isFinite(context.layout.worldScaleY)
+    ? Math.abs(context.layout.worldScaleY)
+    : Math.abs(context.layout.worldScale);
+  return scaleY > 1e-8 ? scaleX / scaleY : 1;
 }
 
 function drawCircle(
@@ -273,13 +285,14 @@ function drawPlayerSprite(
 function drawPassengerSprite(
   context: RenderContext,
   sprite: PassengerSpriteAsset,
+  kind: PassengerKind,
   frameIndex: number,
   size: number,
   baseScale: number,
 ): boolean {
   const { ctx } = context;
   if (!sprite.ready || sprite.failed || typeof ctx.drawImage !== 'function') return false;
-  const frame = sprite.frames[frameIndex % sprite.frames.length];
+  const frame = passengerSpriteFrame(sprite, kind, frameIndex);
   if (!frame) return false;
   ctx.save();
   try {
@@ -320,8 +333,14 @@ function compensateLandscapeScale(context: RenderContext): void {
   ctx.scale(1, scaleX / scaleY);
 }
 
-function drawShadow(context: RenderContext, position: Vec2, radius: number, alpha = 0.42): void {
-  const shadow = { x: position.x, y: position.y + radius * 0.78 };
+function drawShadow(
+  context: RenderContext,
+  position: Vec2,
+  radius: number,
+  alpha = 0.42,
+  yOffset = radius * 0.78,
+): void {
+  const shadow = { x: position.x, y: position.y + yOffset };
   const { ctx } = context;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -337,18 +356,30 @@ function drawMiniCompanion(context: RenderContext, palette: CharacterPalette, of
   ctx.globalAlpha = alpha;
   ctx.translate(offset.x, offset.y);
   compensateLandscapeScale(context);
-  const scale = actorVisualScale(context, 0.7);
+  const scale = actorVisualScale(context, 0.86);
   ctx.scale(scale, scale);
-  drawEllipse(context, { x: 0, y: 5 }, 7, 3, '#173348');
-  ctx.fillStyle = palette.pants;
-  ctx.fillRect(-4, 1, 8, 9);
-  ctx.fillStyle = palette.shirt;
-  ctx.fillRect(-5, -4, 10, 8);
+  drawEllipse(context, { x: 0, y: 6 }, 6.2, 2.5, '#173348');
+  ctx.strokeStyle = TIDELINE_TOKENS.color.actorInk;
+  ctx.lineWidth = 1.1;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-2.2, 6);
+  ctx.lineTo(-2.8, 11);
+  ctx.moveTo(2.2, 6);
+  ctx.lineTo(2.8, 11);
+  ctx.stroke();
+  fillRoundRect(ctx, -4.8, -1, 9.6, 9, 3.2, '#f4b4d1');
+  strokeRoundRect(ctx, -4.8, -1, 9.6, 9, 3.2, TIDELINE_TOKENS.color.actorInk, 1.1);
   drawCircle(context, { x: 0, y: -8 }, 4.2, palette.skin, '#f4fff8', 1.25);
   ctx.fillStyle = palette.hair;
   ctx.beginPath();
-  ctx.arc(0, -9, 4.2, Math.PI, Math.PI * 2);
+  ctx.arc(0, -9.2, 4.2, Math.PI * 1.05, Math.PI * 1.98);
+  ctx.lineTo(3.5, -7.2);
+  ctx.lineTo(-3.5, -7.2);
   ctx.fill();
+  drawCircle(context, { x: 4.6, y: -8.5 }, 1.6, palette.hair, '#f4fff8', 0.7);
+  drawCircle(context, { x: -1.2, y: -7.9 }, 0.55, palette.hair);
+  drawCircle(context, { x: 1.2, y: -7.9 }, 0.55, palette.hair);
   ctx.restore();
 }
 
@@ -697,15 +728,30 @@ function drawNpcHead(
       drawCircle(context, { x: profile.headRadius + 0.4, y: headY + 0.8 }, 0.9, '#b9fbff');
       break;
     case 'group':
+      // 妈妈只保留头顶发帽与高位马尾，脸颊完全留肤色，避免小尺寸下读成胡子。
       ctx.fillStyle = palette.hair;
       ctx.beginPath();
       ctx.arc(0, headY - 0.8, profile.headRadius + 0.2, Math.PI * 1.05, Math.PI * 1.98);
+      ctx.lineTo(profile.headRadius - 0.3, headY - 0.4);
+      ctx.lineTo(profile.headRadius - 2.2, headY - 1.2);
+      ctx.lineTo(0.8, headY - 0.2);
+      ctx.lineTo(-1.6, headY - 1.2);
+      ctx.lineTo(-profile.headRadius + 0.6, headY - 0.4);
+      ctx.closePath();
       ctx.fill();
+      drawCircle(context, { x: profile.headRadius + 2.1, y: headY - 3.4 }, 2.8, palette.hair, outline, 0.8);
       fillPolygon(context, [
-        { x: profile.headRadius - 0.5, y: headY - 4.2 },
-        { x: profile.headRadius + 2.8, y: headY - 5.4 },
-        { x: profile.headRadius + 1.4, y: headY - 1.8 },
+        { x: profile.headRadius + 3.6, y: headY - 4.8 },
+        { x: profile.headRadius + 6.2, y: headY - 3.4 },
+        { x: profile.headRadius + 3.6, y: headY - 2.4 },
       ], '#f48bb9', outline, 0.7);
+      ctx.strokeStyle = '#7b5a78';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(-profile.headRadius + 1.4, headY - 1.5);
+      ctx.lineTo(0, headY - 2.5);
+      ctx.lineTo(profile.headRadius - 1.4, headY - 1.5);
+      ctx.stroke();
       break;
     case 'regular':
     default:
@@ -820,6 +866,8 @@ function drawPassenger(
   passenger: Passenger,
   now: number,
   passengerSprite?: PassengerSpriteAsset,
+  passengerAtlasSprite?: PassengerSpriteAsset,
+  passengerFastSprite?: PassengerSpriteAsset,
 ): void {
   const { ctx } = context;
   const palette = PASSENGER_PALETTES[passenger.kind];
@@ -833,6 +881,16 @@ function drawPassenger(
   const guideBob = guideStrength > 0
     ? Math.sin(now * 18 + phase) * 1.2 * guideStrength
     : 0;
+  // 快步客有独立 PNG，但微信低版本/缓存异常时可能只让该图片失败；
+  // 此时必须切到同一套 PNG 六行图集，否则会一直拿着失败对象而不尝试图集行。
+  const fastSpriteReady = Boolean(passengerFastSprite && passengerFastSprite.ready && !passengerFastSprite.failed);
+  const spriteAsset = passenger.kind === 'regular'
+    ? passengerSprite
+    : passenger.kind === 'fast'
+      ? (fastSpriteReady ? passengerFastSprite : passengerAtlasSprite ?? passengerFastSprite)
+      : passengerAtlasSprite;
+  const spriteBaseScale = Math.max(0.76, Math.min(1.65, (passenger.radius / 9) * (inside || boarding ? 1.1 : 1)));
+  const spriteSize = 32;
   const alphaBefore = ctx.globalAlpha;
   if (inside || boarding) {
     // 车内角色使用地板反光和高对比轮廓，明确表示已经越过门槛。
@@ -847,10 +905,21 @@ function drawPassenger(
     );
     ctx.restore();
   }
-  if (passenger.kind === 'group') {
-    drawMiniCompanion(context, palette, { x: passenger.position.x - passenger.radius * 0.85, y: passenger.position.y + passenger.radius * 0.18 }, 0.9);
+  const groupSpriteReady = passenger.kind === 'group'
+    && Boolean(spriteAsset && spriteAsset.ready && !spriteAsset.failed);
+  if (passenger.kind === 'group' && !groupSpriteReady) {
+    drawMiniCompanion(context, palette, { x: passenger.position.x - passenger.radius * 1.2, y: passenger.position.y + passenger.radius * 0.24 }, 0.94);
   }
-  drawShadow(context, passenger.position, passenger.radius, inside ? 0.22 : 0.42);
+  const spriteReady = Boolean(spriteAsset && spriteAsset.ready && !spriteAsset.failed);
+  // Sprite 的局部 y 轴会按横屏的 X/Y 世界比例补偿；阴影的平移发生在补偿前，
+  // 因此要把脚底偏移换算回世界 y，才能落在角色脚下而不是身体中段。
+  const shadowOffset = spriteReady
+    ? Math.max(
+      passenger.radius * 0.78,
+      (spriteSize / 2) * actorVisualScale(context, spriteBaseScale) * landscapeYCompensation(context) * 0.9,
+    )
+    : passenger.radius * 0.78;
+  drawShadow(context, passenger.position, passenger.radius, inside ? 0.22 : 0.42, shadowOffset);
   // 身体几何以角色位置为局部原点；没有这次平移时，头/身体会落在世界原点，
   // 乘客虽然在规则层移动，画面里却看起来像没有跟着走。
   ctx.save();
@@ -866,12 +935,10 @@ function drawPassenger(
   const spriteFrame = guideStrength > 0
     ? 3
     : moving
-      ? 1 + (Math.floor(now / frameDuration) % 2)
+      ? WALK_FRAME_SEQUENCE[Math.floor(now / frameDuration) % WALK_FRAME_SEQUENCE.length]!
       : 0;
-  const spriteBaseScale = Math.max(0.76, Math.min(1.65, (passenger.radius / 9) * (inside || boarding ? 1.1 : 1)));
-  const spriteSize = 32;
-  const spriteDrawn = passenger.kind === 'regular' && passengerSprite
-    ? drawPassengerSprite(context, passengerSprite, spriteFrame, spriteSize, spriteBaseScale)
+  const spriteDrawn = spriteAsset
+    ? drawPassengerSprite(context, spriteAsset, passenger.kind, spriteFrame, spriteSize, spriteBaseScale)
     : false;
   if (!spriteDrawn) {
     drawCharacterBody(context, palette, passenger.radius, moving ? walkPhase : phase, passenger.kind, inside || boarding);
@@ -898,6 +965,7 @@ function drawPlayer(
   context: RenderContext,
   state: GameState,
   playerSprite?: PlayerSpriteAsset,
+  appearanceId = 'default',
 ): void {
   const { ctx } = context;
   const player = state.player;
@@ -911,7 +979,17 @@ function drawPlayer(
     ? Math.abs(Math.sin(state.elapsed * 12)) * 1.2
     : Math.sin(state.elapsed * 3.2) * 0.55;
 
-  drawShadow(context, player.position, player.radius, 0.52);
+  const scale = Math.max(0.78, Math.min(1.55, player.radius / 10));
+  const visualScale = actorVisualScale(context, scale);
+  const spriteSize = Math.max(30, Math.min(46, player.radius * 3.5));
+  const spriteReady = Boolean(playerSprite && playerSprite.ready && !playerSprite.failed);
+  const shadowOffset = spriteReady
+    ? Math.max(
+      player.radius * 0.78,
+      (spriteSize / 2) * visualScale * landscapeYCompensation(context) * 0.9,
+    )
+    : player.radius * 0.78;
+  drawShadow(context, player.position, player.radius, 0.52, shadowOffset);
   ctx.save();
   if (player.inSafeZone) {
     ctx.globalAlpha = 0.2;
@@ -920,14 +998,25 @@ function drawPlayer(
   }
   ctx.translate(player.position.x, player.position.y - bob * 0.22);
   compensateLandscapeScale(context);
-  const scale = Math.max(0.78, Math.min(1.55, player.radius / 10));
-  const visualScale = actorVisualScale(context, scale);
   const squash = moving
     ? 1 + Math.sin(state.elapsed * 12) * 0.035
     : 1 + Math.sin(state.elapsed * 3.2) * 0.02;
   ctx.scale(visualScale * squash, visualScale * (1 - (squash - 1)));
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  const appearanceAccent = appearanceId === 'sunset'
+    ? '#ff9a58'
+    : appearanceId === 'night'
+      ? '#7799ff'
+      : appearanceId === 'seafoam'
+        ? '#55d8c4'
+        : '#36c8bb';
+  if (appearanceId !== 'default') {
+    ctx.save();
+    ctx.globalAlpha = 0.34;
+    drawCircle(context, { x: 0, y: 1 }, 10.5, appearanceAccent);
+    ctx.restore();
+  }
 
   const frameDuration = Number.isFinite(playerSprite?.frameDuration) && (playerSprite?.frameDuration ?? 0) > 0
     ? playerSprite!.frameDuration
@@ -935,9 +1024,8 @@ function drawPlayer(
   const spriteFrame = guideStrength > 0
     ? (guideAge < 0.16 || Math.floor(guideAge * 12) % 2 === 0 ? 3 : 0)
     : moving
-      ? 1 + (Math.floor(state.elapsed / frameDuration) % 2)
+      ? WALK_FRAME_SEQUENCE[Math.floor(state.elapsed / frameDuration) % WALK_FRAME_SEQUENCE.length]!
       : 0;
-  const spriteSize = Math.max(30, Math.min(46, player.radius * 3.5));
   const spriteDrawn = playerSprite
     ? drawPlayerSprite(context, playerSprite, spriteFrame, spriteSize)
     : false;
@@ -1031,9 +1119,18 @@ function isPassengerVisible(
   state: GameState,
 ): boolean {
   if (passenger.role === 'exited') return false;
+  // 原作的站台上车流在车门打开、下车流开始后才涌入；进站和预判阶段
+  // 只展示车内乘客，给玩家留下观察车门和提前站位的空间。
+  if (
+    passenger.role === 'waiting'
+    && (state.phase === 'intro' || state.phase === 'arriving' || state.phase === 'positioning')
+  ) return false;
   if (passenger.role !== 'inside' && passenger.role !== 'boarding' && passenger.role !== 'alighting') {
     return true;
   }
+  // 已越过门洞的下车客已经位于站台侧；即使原门随后关闭，仍需保持可见，
+  // 让下车流继续穿过站台并对后续上车流产生拥挤影响。
+  if (passenger.role === 'alighting' && passenger.routeProgress >= 1) return true;
 
   // 车厢先于角色绘制；关门时直接跳过车内角色，避免没有 clip API 时
   // 仍能从车门/车窗上看到乘客。下车流的移动也由规则层的同一开门状态驱动。
@@ -1048,6 +1145,9 @@ export function renderActors(
   _level: LevelConfig,
   playerSprite?: PlayerSpriteAsset,
   passengerSprite?: PassengerSpriteAsset,
+  passengerAtlasSprite?: PassengerSpriteAsset,
+  passengerFastSprite?: PassengerSpriteAsset,
+  appearanceId = 'default',
 ): void {
   renderContext.withWorld(() => {
     // 关门时不绘制车内/下车中的角色；开门后才让他们从门洞中出现。
@@ -1059,8 +1159,8 @@ export function renderActors(
         if (left.role !== 'inside' && right.role === 'inside') return 1;
         return left.position.y - right.position.y;
       });
-    for (const passenger of passengers) drawPassenger(renderContext, passenger, state.elapsed, passengerSprite);
-    drawPlayer(renderContext, state, playerSprite);
+    for (const passenger of passengers) drawPassenger(renderContext, passenger, state.elapsed, passengerSprite, passengerAtlasSprite, passengerFastSprite);
+    drawPlayer(renderContext, state, playerSprite, appearanceId);
   });
 }
 

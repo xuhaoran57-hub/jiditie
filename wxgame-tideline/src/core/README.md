@@ -8,8 +8,8 @@
 - `GameSimulation`：创建一局、推进时间、切换车门和触发疏导；
 - `PhaseMachine`：可单独测试的进站/下车/上车/警告/结算状态机；
 - `createPassengers`、`resolveCollisions`：确定性人群生成、空间哈希和圆形碰撞；
-- `MVP_LEVELS`：海风门、云港、星环城三份数据驱动关卡；
-- `LevelEventConfig` / `GameState.activeEvent`：按局内时间驱动雨天、临时换门和行李车规则事件；
+- `CAMPAIGN_LEVELS`：12 站正式战役；`MVP_LEVELS` 保留为前三关兼容别名；
+- `LevelEventConfig` / `GameState.activeEvent`：按局内时间驱动雨天、提前关门、行李车和快步人流事件；
 - `calculateScore`、`emptySave`/`parseSave`/`serializeSave`：评分与版本化存档。
 
 运行 `npm run check` 可先做 TypeScript 类型检查，再执行 Node 核心回归测试。

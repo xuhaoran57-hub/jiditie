@@ -1,4 +1,4 @@
-import type { GameState, LevelConfig, ScoreResult } from '../core/types.ts';
+import type { GameState, LevelConfig, SaveSettings, ScoreResult } from '../core/types.ts';
 import { clamp } from '../core/vector.ts';
 import type { Canvas2DContextLike } from './context.ts';
 import {
@@ -6,6 +6,10 @@ import {
   fillRoundRect,
   RenderContext,
   routeCardRect,
+  routeListRect,
+  routeListCardRect,
+  menuButtonRect,
+  pageBackRect,
   worldDirectionToScreen,
   strokeRoundRect,
 } from './context.ts';
@@ -32,6 +36,25 @@ const PHASE_LABELS: Record<GameState['phase'], string> = {
   warning: '即将关门',
   result: '本局结算',
 };
+
+function objectiveSummary(level: LevelConfig): string {
+  return (level.objectives ?? []).slice(0, 3).map((objective) => {
+    switch (objective.id) {
+      case 'alighting-rate': return `下车${Math.round(objective.minRatio * 100)}%`;
+      case 'finish-time': return `提前${objective.minRemaining}s`;
+      case 'guide-limit': return `疏导≤${objective.maxUses}`;
+      case 'courtesy-score': return `礼让≥${Math.round(objective.minScore)}`;
+      case 'stamina': return `体力≥${Math.round(objective.minRatio * 100)}%`;
+      case 'no-collision': return '零碰撞';
+      default: return '';
+    }
+  }).filter(Boolean).join(' · ');
+}
+
+function starDisplay(value: number): string {
+  const stars = Math.min(3, Math.max(0, Math.floor(Number.isFinite(value) ? value : 0)));
+  return '★'.repeat(stars) + '☆'.repeat(3 - stars);
+}
 
 function drawBar(
   ctx: Canvas2DContextLike,
@@ -83,8 +106,11 @@ function renderLandscapeHud(renderContext: RenderContext, level: LevelConfig, st
   const centerX = rect.x + rect.width / 2;
   const barWidth = Math.max(24, rect.width - padding * 2);
   const occupancy = state.doors.reduce((sum, door) => sum + door.occupancy, 0);
+  const eventLabel = state.activeEvent?.kind === 'door-close' && state.activeEvent.phase === 'warning'
+    ? `即将关闭 ${formatSeconds(state.activeEvent.remaining)}`
+    : state.activeEvent ? `${state.activeEvent.label} ${formatSeconds(state.activeEvent.remaining)}` : '';
   const phaseLabel = state.activeEvent
-    ? `${PHASE_LABELS[state.phase]} · ${state.activeEvent.label} ${formatSeconds(state.activeEvent.remaining)}`
+    ? `${PHASE_LABELS[state.phase]} · ${eventLabel}`
     : PHASE_LABELS[state.phase];
   const statsTop = rect.y + Math.max(76, rect.height - 40);
   renderContext.withScreen(() => {
@@ -150,8 +176,11 @@ export function renderHud(renderContext: RenderContext, level: LevelConfig, stat
     ctx.fillText(level.stationName, rect.x + 14, rect.y + 10);
     ctx.font = canvasFont(400, 12);
     ctx.fillStyle = UI.muted;
+    const eventLabel = state.activeEvent?.kind === 'door-close' && state.activeEvent.phase === 'warning'
+      ? `即将关闭 ${formatSeconds(state.activeEvent.remaining)}`
+      : state.activeEvent?.label ?? '';
     const phaseLabel = state.activeEvent
-      ? `${PHASE_LABELS[state.phase]} · ${state.activeEvent.label}`
+      ? `${PHASE_LABELS[state.phase]} · ${eventLabel}`
       : PHASE_LABELS[state.phase];
     ctx.fillText(phaseLabel, rect.x + 14, rect.y + 33);
 
@@ -187,7 +216,7 @@ export function renderHud(renderContext: RenderContext, level: LevelConfig, stat
       strokeRoundRect(ctx, banner.x, banner.y, banner.width, banner.height, 9, UI.gold, 1);
       drawCenteredText(
         ctx,
-        `${state.activeEvent.label} ${formatSeconds(state.activeEvent.remaining)}`,
+        eventLabel,
         { x: banner.x + banner.width / 2, y: banner.y + banner.height / 2 },
         canvasFont(400, 11),
         UI.text,
@@ -292,11 +321,14 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
         x: rect.x + rect.width / 2,
         y: rect.y + 82,
       }, canvasFont(700, 15), medalColor(score.medal));
+      drawCenteredText(ctx, `三星目标 ${score.stars} / 3`, {
+        x: rect.x + rect.width / 2,
+        y: rect.y + 101,
+      }, canvasFont(600, 11), UI.gold);
       const rows: Array<[string, number]> = [
         ['\u6548\u7387', score.efficiency],
         ['\u793c\u8ba9', score.courtesy],
         ['\u4f53\u529b', score.stamina],
-        ['\u8def\u7ebf', score.route],
       ];
       const columnGap = 18;
       const cellWidth = Math.max(70, (rect.width - 48 - columnGap) / 2);
@@ -304,7 +336,7 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
         const column = index % 2;
         const row = Math.floor(index / 2);
         const cellX = rect.x + 24 + column * (cellWidth + columnGap);
-        const cellY = rect.y + 116 + row * 34;
+        const cellY = rect.y + 126 + row * 34;
         ctx.font = canvasFont(400, 11);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -365,14 +397,14 @@ export function renderResultScreen(renderContext: RenderContext, level: LevelCon
 
     if (score) {
       drawCenteredText(ctx, score.medal === 'none' ? '继续观察，再试一局' : `${score.medal.toUpperCase()} 牌`, { x: rect.x + rect.width / 2, y: rect.y + 108 }, canvasFont(700, 18), medalColor(score.medal));
+      drawCenteredText(ctx, `三星目标 ${score.stars} / 3`, { x: rect.x + rect.width / 2, y: rect.y + 132 }, canvasFont(600, 12), UI.gold);
       const rows: Array<[string, number]> = [
         ['效率', score.efficiency],
         ['礼让', score.courtesy],
         ['体力', score.stamina],
-        ['路线', score.route],
       ];
       rows.forEach(([label, value], index) => {
-        const y = rect.y + 142 + index * 28;
+        const y = rect.y + 158 + index * 28;
         ctx.font = canvasFont(400, 13);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -419,51 +451,204 @@ function renderLandscapeRoutePage(
   levels: readonly LevelConfig[],
   unlockedLevelIds: readonly string[],
   selectedIndex: number,
+  bestScores: Readonly<Record<string, number>>,
+  bestStars: Readonly<Record<string, number>>,
+  dropdownExpanded: boolean,
+  scrollOffset: number,
 ): void {
   const { ctx, layout } = renderContext;
   const content = layout.viewport.contentRect;
+  const visibleLevels = levels.map((level, index) => ({ level, index })).filter(({ level }) => unlockedLevelIds.includes(level.id));
   renderContext.withScreen(() => {
     ctx.fillStyle = '#0b1627';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
-    drawCenteredText(ctx, '\u6f6e\u6c5f\u7ebf', {
-      x: content.x + content.width / 2,
-      y: content.y + 28,
-    }, canvasFont(700, 24), UI.text);
-    drawCenteredText(ctx, '\u9009\u62e9\u4e00\u7ad9\uff0c\u7ec3\u4e60\u66f4\u4f53\u9762\u7684\u901a\u884c', {
-      x: content.x + content.width / 2,
-      y: content.y + 54,
-    }, canvasFont(400, 11), UI.muted);
-
-    levels.forEach((level, index) => {
-      const card = routeCardRect(layout.viewport, index);
-      const unlocked = unlockedLevelIds.includes(level.id);
+    renderPageButton(renderContext, pageBackRect(layout.viewport), '首页');
+    drawCenteredText(ctx, '挤上这班车', { x: content.x + content.width / 2, y: content.y + 28 }, canvasFont(700, 24), UI.text);
+    drawCenteredText(ctx, '潮汐线·仅展示已解锁关卡', { x: content.x + content.width / 2, y: content.y + 54 }, canvasFont(400, 11), UI.muted);
+    const list = routeListRect(layout.viewport);
+    drawCenteredText(ctx, '上下滑动选择已解锁关卡', { x: content.x + content.width / 2, y: content.y + 76 }, canvasFont(400, 10), UI.muted);
+    visibleLevels.forEach(({ level, index }, visibleIndex) => {
+      const card = routeListCardRect(layout.viewport, visibleIndex, scrollOffset);
+      if (card.y + card.height < list.y || card.y > list.y + list.height) return;
       const selected = index === selectedIndex;
       const padding = clamp(card.height * 0.15, 10, 16);
       const titleSize = clamp(card.height * 0.17, 12, 16);
       const bodySize = clamp(card.height * 0.115, 9, 12);
       const radius = clamp(card.height * 0.16, 9, 15);
-      fillRoundRect(ctx, card.x, card.y, card.width, card.height, radius, unlocked ? UI.panel : '#151d2d');
+      fillRoundRect(ctx, card.x, card.y, card.width, card.height, radius, UI.panel);
       strokeRoundRect(ctx, card.x, card.y, card.width, card.height, radius, selected ? UI.accent : '#30415c', selected ? 2 : 1);
       ctx.font = canvasFont(700, titleSize);
-      ctx.fillStyle = unlocked ? UI.text : UI.muted;
+      ctx.fillStyle = UI.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      fillTextCompat(ctx, `${index + 1}. ${level.name}`, card.x + padding, card.y + padding, Math.max(1, card.width - padding * 2));
+      fillTextCompat(ctx, (index + 1) + '. ' + level.name, card.x + padding, card.y + padding, Math.max(1, card.width - padding * 2));
       ctx.font = canvasFont(400, bodySize);
       ctx.fillStyle = UI.muted;
-      fillTextCompat(
-        ctx,
-        unlocked ? level.description : '\u5b8c\u6210\u4e0a\u4e00\u7ad9\u540e\u89e3\u9501',
-        card.x + padding,
-        card.y + card.height * 0.46,
-        Math.max(1, card.width - padding * 2),
-      );
+      fillTextCompat(ctx, level.description, card.x + padding, card.y + card.height * 0.42, Math.max(1, card.width - padding * 2));
       ctx.font = canvasFont(600, bodySize);
       ctx.textAlign = 'right';
       ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = unlocked ? UI.accent : UI.muted;
-      ctx.fillText(unlocked ? '\u53ef\u51fa\u53d1' : '\u9501\u5b9a', card.x + card.width - padding, card.y + card.height - padding);
+      ctx.fillStyle = UI.accent;
+      ctx.fillText('可出发', card.x + card.width - padding, card.y + card.height - padding);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = UI.gold;
+      ctx.fillText(starDisplay(bestStars[level.id] ?? 0), card.x + padding, card.y + card.height - padding);
+      if (bestScores[level.id] !== undefined) {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = UI.muted;
+        ctx.fillText('最高 ' + String(bestScores[level.id]), card.x + card.width / 2, card.y + card.height - padding);
+      }
     });
+    if (visibleLevels.length === 0) drawCenteredText(ctx, '暂无可用关卡', { x: content.x + content.width / 2, y: content.y + content.height / 2 }, canvasFont(600, 15), UI.muted);
+  });
+}
+
+function renderPageButton(
+  renderContext: RenderContext,
+  rect: { x: number; y: number; width: number; height: number },
+  label: string,
+  detail?: string,
+  selected = false,
+): void {
+  const { ctx } = renderContext;
+  fillRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 12, selected ? '#24566b' : UI.panel);
+  strokeRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 12, selected ? UI.accent : '#30415c', selected ? 2 : 1);
+  drawCenteredText(ctx, label, { x: rect.x + rect.width / 2, y: rect.y + rect.height * 0.42 }, canvasFont(700, 15), UI.text);
+  if (detail) drawCenteredText(ctx, detail, { x: rect.x + rect.width / 2, y: rect.y + rect.height * 0.74 }, canvasFont(400, 10), UI.muted);
+}
+
+export function renderHomePage(renderContext: RenderContext): void {
+  const { ctx, layout } = renderContext;
+  const content = layout.viewport.contentRect;
+  renderContext.withScreen(() => {
+    ctx.fillStyle = '#0b1627';
+    ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
+    drawCenteredText(ctx, '挤上这班车', { x: content.x + content.width / 2, y: content.y + 38 }, canvasFont(800, 28), UI.text);
+    drawCenteredText(ctx, '湾城潮汐线 · 通勤挑战', { x: content.x + content.width / 2, y: content.y + 66 }, canvasFont(400, 13), UI.muted);
+    const buttons = [
+      ['开始游戏', '选择已解锁关卡'],
+      ['成就', '查看三星目标与称号'],
+      ['外观更换', '更换主角配色'],
+      ['设置', '声音与震动'],
+    ] as const;
+    buttons.forEach(([label, detail], index) => renderPageButton(renderContext, menuButtonRect(layout.viewport, index, buttons.length), label, detail));
+    drawCenteredText(ctx, '所有线路均为虚构设定', { x: content.x + content.width / 2, y: content.y + content.height - 20 }, canvasFont(400, 10), UI.muted);
+  });
+}
+
+export function renderLevelBriefing(renderContext: RenderContext, level: LevelConfig): void {
+  const { ctx, layout } = renderContext;
+  const content = layout.viewport.contentRect;
+  renderContext.withScreen(() => {
+    ctx.fillStyle = '#0b1627';
+    ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
+    ctx.globalAlpha = 0.96;
+    const panel = layout.resultRect;
+    fillRoundRect(ctx, panel.x, panel.y, panel.width, panel.height, 20, UI.panel);
+    strokeRoundRect(ctx, panel.x, panel.y, panel.width, panel.height, 20, UI.accent, 2);
+    ctx.globalAlpha = 1;
+    drawCenteredText(ctx, '出发前提醒', { x: content.x + content.width / 2, y: panel.y + 42 }, canvasFont(800, 23), UI.text);
+    drawCenteredText(ctx, level.stationName, { x: content.x + content.width / 2, y: panel.y + 70 }, canvasFont(500, 13), UI.muted);
+    drawCenteredText(ctx, '本关三星目标', { x: panel.x + panel.width / 2, y: panel.y + 112 }, canvasFont(700, 14), UI.gold);
+    (level.objectives ?? []).slice(0, 3).forEach((objective, index) => {
+      const label = objectiveSummary({ ...level, objectives: [objective] });
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = canvasFont(600, 13);
+      ctx.fillStyle = UI.text;
+      ctx.fillText(`${index + 1}. ${label}`, panel.x + 28, panel.y + 142 + index * 27);
+    });
+    fillRoundRect(ctx, layout.briefingConfirmRect.x, layout.briefingConfirmRect.y, layout.briefingConfirmRect.width, layout.briefingConfirmRect.height, 12, UI.accent);
+    drawCenteredText(ctx, '确认并开始', { x: layout.briefingConfirmRect.x + layout.briefingConfirmRect.width / 2, y: layout.briefingConfirmRect.y + 22 }, canvasFont(700, 15), '#06202b');
+  });
+}
+
+export function renderAchievementsPage(
+  renderContext: RenderContext,
+  levels: readonly LevelConfig[],
+  bestStars: Readonly<Record<string, number>>,
+): void {
+  const { ctx, layout } = renderContext;
+  const content = layout.viewport.contentRect;
+  const totalStars = levels.reduce((sum, level) => sum + Math.min(3, Math.max(0, bestStars[level.id] ?? 0)), 0);
+  renderContext.withScreen(() => {
+    ctx.fillStyle = '#0b1627';
+    ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
+    renderPageButton(renderContext, pageBackRect(layout.viewport), '返回');
+    drawCenteredText(ctx, '成就', { x: content.x + content.width / 2, y: content.y + 38 }, canvasFont(800, 26), UI.text);
+    drawCenteredText(ctx, `战役星数 ${totalStars} / ${levels.length * 3}`, { x: content.x + content.width / 2, y: content.y + 66 }, canvasFont(500, 13), UI.gold);
+    levels.forEach((level, index) => {
+      const card = routeCardRect(layout.viewport, index, levels.length);
+      fillRoundRect(ctx, card.x, card.y, card.width, card.height, 10, UI.panel);
+      strokeRoundRect(ctx, card.x, card.y, card.width, card.height, 10, '#30415c', 1);
+      ctx.font = canvasFont(600, Math.max(10, Math.min(14, card.height * 0.16)));
+      ctx.fillStyle = UI.text;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      fillTextCompat(ctx, `${index + 1}. ${level.name}`, card.x + 10, card.y + 9, card.width - 20);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = UI.gold;
+      ctx.fillText('★'.repeat(Math.min(3, Math.max(0, bestStars[level.id] ?? 0))) + '☆'.repeat(3 - Math.min(3, Math.max(0, bestStars[level.id] ?? 0))), card.x + card.width - 10, card.y + 10);
+    });
+  });
+}
+
+export function renderAppearancePage(renderContext: RenderContext, appearanceId: string, unlockedAppearanceIds: readonly string[] = ['default']): void {
+  const { ctx, layout } = renderContext;
+  const content = layout.viewport.contentRect;
+  const appearances = [
+    ['default', '基础通勤装', '#63d5c0', '默认开放'],
+    ['seafoam', '海风薄荷', '#55d8c4', '通关海风门'],
+    ['sunset', '晚霞橙', '#ff9a58', '累计获得 6 颗星'],
+    ['night', '夜行蓝', '#7799ff', '完成 12 站战役'],
+  ] as const;
+  renderContext.withScreen(() => {
+    ctx.fillStyle = '#0b1627';
+    ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
+    renderPageButton(renderContext, pageBackRect(layout.viewport), '返回');
+    drawCenteredText(ctx, '外观更换', { x: content.x + content.width / 2, y: content.y + 38 }, canvasFont(800, 26), UI.text);
+    appearances.forEach(([id, label, color, condition], index) => {
+      const card = menuButtonRect(layout.viewport, index, appearances.length);
+      const unlocked = unlockedAppearanceIds.includes(id);
+      fillRoundRect(ctx, card.x, card.y, card.width, card.height, 12, UI.panel);
+      strokeRoundRect(ctx, card.x, card.y, card.width, card.height, 12, id === appearanceId ? UI.accent : '#30415c', id === appearanceId ? 2 : 1);
+      ctx.globalAlpha = unlocked ? 1 : 0.5;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(card.x + 28, card.y + card.height / 2, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = canvasFont(600, 14);
+      ctx.fillStyle = UI.text;
+      ctx.fillText(label, card.x + 48, card.y + card.height * 0.4);
+      ctx.font = canvasFont(400, 10);
+      ctx.fillStyle = unlocked ? UI.muted : UI.warning;
+      ctx.fillText(unlocked ? condition : `未解锁 · ${condition}`, card.x + 48, card.y + card.height * 0.7);
+      if (id === appearanceId && unlocked) {
+        ctx.textAlign = 'right';
+        ctx.fillStyle = UI.accent;
+        ctx.fillText('已使用', card.x + card.width - 14, card.y + card.height / 2);
+      }
+      ctx.globalAlpha = 1;
+    });
+  });
+}
+
+export function renderSettingsPage(renderContext: RenderContext, settings: SaveSettings): void {
+  const { ctx, layout } = renderContext;
+  const content = layout.viewport.contentRect;
+  const entries = [
+    ['声音', settings.soundEnabled],
+    ['音乐', settings.musicEnabled],
+    ['震动', settings.vibrationEnabled],
+  ] as const;
+  renderContext.withScreen(() => {
+    ctx.fillStyle = '#0b1627';
+    ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
+    renderPageButton(renderContext, pageBackRect(layout.viewport), '返回');
+    drawCenteredText(ctx, '设置', { x: content.x + content.width / 2, y: content.y + 38 }, canvasFont(800, 26), UI.text);
+    entries.forEach(([label, enabled], index) => renderPageButton(renderContext, menuButtonRect(layout.viewport, index, entries.length), label, enabled ? '开启' : '关闭', enabled));
   });
 }
 
@@ -472,32 +657,38 @@ export function renderRoutePage(
   levels: readonly LevelConfig[],
   unlockedLevelIds: readonly string[],
   selectedIndex = 0,
+  bestScores: Readonly<Record<string, number>> = {},
+  bestStars: Readonly<Record<string, number>> = {},
+  dropdownExpanded = true,
+  scrollOffset = 0,
 ): void {
   const { ctx, layout } = renderContext;
   if (layout.orientation === 'landscape') {
-    renderLandscapeRoutePage(renderContext, levels, unlockedLevelIds, selectedIndex);
+    renderLandscapeRoutePage(renderContext, levels, unlockedLevelIds, selectedIndex, bestScores, bestStars, dropdownExpanded, scrollOffset);
     return;
   }
   renderContext.withScreen(() => {
     const content = layout.viewport.contentRect;
+    const visibleLevels = levels.map((level, index) => ({ level, index })).filter(({ level }) => unlockedLevelIds.includes(level.id));
     ctx.fillStyle = '#0b1627';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
-    drawCenteredText(ctx, '潮汐线', { x: content.x + content.width / 2, y: content.y + 52 }, canvasFont(700, 28), UI.text);
-    drawCenteredText(ctx, '选择一站，练习更体面的通行', { x: content.x + content.width / 2, y: content.y + 82 }, canvasFont(400, 13), UI.muted);
-    levels.forEach((level, index) => {
-      const card = routeCardRect(layout.viewport, index);
+    renderPageButton(renderContext, pageBackRect(layout.viewport), '首页');
+    drawCenteredText(ctx, '挤上这班车', { x: content.x + content.width / 2, y: content.y + 52 }, canvasFont(700, 28), UI.text);
+    drawCenteredText(ctx, '已解锁关卡列表', { x: content.x + content.width / 2, y: content.y + 82 }, canvasFont(400, 13), UI.muted);
+    const list = routeListRect(layout.viewport);
+    drawCenteredText(ctx, '上下滑动选择已解锁关卡', { x: content.x + content.width / 2, y: content.y + 105 }, canvasFont(400, 12), UI.muted);
+    visibleLevels.forEach(({ level, index }, visibleIndex) => {
+      const card = routeListCardRect(layout.viewport, visibleIndex, scrollOffset);
+      if (card.y + card.height < list.y || card.y > list.y + list.height) return;
       const y = card.y;
-      const unlocked = unlockedLevelIds.includes(level.id);
       const selected = index === selectedIndex;
-      // 先画一层基础矩形。部分微信 Canvas 实现对圆角路径支持不完整，
-      // 但 fillRect/strokeRect 是稳定能力；基础层可保证卡片和命中区域始终可见。
       try {
-        ctx.fillStyle = unlocked ? UI.panel : '#151d2d';
+        ctx.fillStyle = UI.panel;
         ctx.fillRect(card.x, y, card.width, card.height);
       } catch {
-        // 圆角/矩形均属于视觉增强；文字和后续卡片仍应继续绘制。
+        // 基础矩形不可用时由圆角兼容路径继续绘制。
       }
-      fillRoundRect(ctx, card.x, y, card.width, card.height, 18, unlocked ? UI.panel : '#151d2d');
+      fillRoundRect(ctx, card.x, y, card.width, card.height, 18, UI.panel);
       try {
         ctx.strokeStyle = selected ? UI.accent : '#30415c';
         ctx.lineWidth = selected ? 2 : 1;
@@ -507,16 +698,25 @@ export function renderRoutePage(
       }
       strokeRoundRect(ctx, card.x, y, card.width, card.height, 18, selected ? UI.accent : '#30415c', selected ? 2 : 1);
       ctx.font = canvasFont(700, 17);
-      ctx.fillStyle = unlocked ? UI.text : UI.muted;
+      ctx.fillStyle = UI.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(`${index + 1}. ${level.name}`, card.x + 18, y + 17);
+      ctx.fillText((index + 1) + '. ' + level.name, card.x + 18, y + 17);
       ctx.font = canvasFont(400, 12);
       ctx.fillStyle = UI.muted;
-      fillTextCompat(ctx, unlocked ? level.description : '完成上一站后解锁', card.x + 18, y + 48, card.width - 36);
+      fillTextCompat(ctx, level.description, card.x + 18, y + card.height * 0.4, card.width - 36);
       ctx.textAlign = 'right';
-      ctx.fillStyle = unlocked ? UI.accent : UI.muted;
-      ctx.fillText(unlocked ? '可出发' : '锁定', card.x + card.width - 18, y + 86);
+      ctx.fillStyle = UI.accent;
+      ctx.fillText('可出发', card.x + card.width - 18, y + card.height - 8);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = UI.gold;
+      ctx.fillText(starDisplay(bestStars[level.id] ?? 0), card.x + 18, y + card.height - 8);
+      if (bestScores[level.id] !== undefined) {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = UI.muted;
+        ctx.fillText('最高 ' + String(bestScores[level.id]), card.x + card.width / 2, y + card.height - 8);
+      }
     });
+    if (visibleLevels.length === 0) drawCenteredText(ctx, '暂无可用关卡', { x: content.x + content.width / 2, y: content.y + content.height / 2 }, canvasFont(600, 15), UI.muted);
   });
 }

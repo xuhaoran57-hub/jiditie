@@ -1,4 +1,4 @@
-import type { GameState, LevelConfig, Rect } from '../core/types.ts';
+import type { GameState, LevelConfig, Rect, SaveSettings } from '../core/types.ts';
 import { renderActors } from './actor-renderer.ts';
 import type { CanvasImageFactory, CanvasLike, ViewportInsets } from './context.ts';
 import {
@@ -9,16 +9,21 @@ import {
 import { renderEffects } from './effects.ts';
 import {
   renderControls,
+  renderAchievementsPage,
+  renderAppearancePage,
+  renderHomePage,
+  renderLevelBriefing,
   renderHud,
   renderPauseOverlay,
   renderResultScreen,
   renderRoutePage,
+  renderSettingsPage,
 } from './canvas-ui.ts';
 import { renderStation } from './station-renderer.ts';
 import { loadPlayerSprite, type PlayerSpriteAsset } from './player-sprite.ts';
-import { loadPassengerRegularSprite, type PassengerSpriteAsset } from './passenger-sprite.ts';
+import { loadPassengerAtlasSprite, loadPassengerFastSprite, loadPassengerRegularSprite, type PassengerSpriteAsset } from './passenger-sprite.ts';
 
-export type RenderScreen = 'game' | 'route' | 'result';
+export type RenderScreen = 'home' | 'game' | 'route' | 'briefing' | 'result' | 'achievements' | 'appearance' | 'settings';
 
 export interface RenderOptions {
   screen?: RenderScreen;
@@ -27,6 +32,14 @@ export interface RenderOptions {
   levels?: readonly LevelConfig[];
   unlockedLevelIds?: readonly string[];
   selectedLevelIndex?: number;
+  bestScores?: Readonly<Record<string, number>>;
+  bestStars?: Readonly<Record<string, number>>;
+  achievements?: readonly string[];
+  appearanceId?: string;
+  unlockedAppearanceIds?: readonly string[];
+  settings?: SaveSettings;
+  routeMenuExpanded?: boolean;
+  routeScrollOffset?: number;
 }
 
 export interface RenderAssetOptions {
@@ -34,6 +47,8 @@ export interface RenderAssetOptions {
   imageFactory?: CanvasImageFactory;
   playerSprite?: PlayerSpriteAsset;
   passengerSprite?: PassengerSpriteAsset;
+  passengerFastSprite?: PassengerSpriteAsset;
+  passengerAtlasSprite?: PassengerSpriteAsset;
 }
 
 function worldBoundsFor(level: LevelConfig): Rect {
@@ -55,6 +70,8 @@ export class GameRenderer {
   private readonly canvas?: CanvasLike;
   readonly playerSprite?: PlayerSpriteAsset;
   readonly passengerSprite?: PassengerSpriteAsset;
+  readonly passengerFastSprite?: PassengerSpriteAsset;
+  readonly passengerAtlasSprite?: PassengerSpriteAsset;
 
   constructor(
     context: RenderContext,
@@ -65,12 +82,25 @@ export class GameRenderer {
     this.canvas = canvas;
     const passengerSprite = assets.passengerSprite
       ?? loadPassengerRegularSprite(assets.imageFactory);
+    const passengerFastSprite = assets.passengerFastSprite
+      ?? loadPassengerFastSprite(assets.imageFactory);
+    const passengerAtlasSprite = assets.passengerAtlasSprite
+      ?? loadPassengerAtlasSprite(assets.imageFactory);
     this.playerSprite = assets.playerSprite ?? loadPlayerSprite(assets.imageFactory);
     // 某些测试桩或低版本运行时可能复用同一个 Image 对象；避免第二次设置
-    // src 覆盖玩家图集，普通 NPC 在这种情况下回退到几何绘制。
+    // src 覆盖玩家图集，NPC 在这种情况下回退到几何绘制。
     this.passengerSprite = passengerSprite?.image === this.playerSprite?.image
       ? undefined
       : passengerSprite;
+    this.passengerFastSprite = passengerFastSprite?.image === this.playerSprite?.image
+      || passengerFastSprite?.image === this.passengerSprite?.image
+      ? undefined
+      : passengerFastSprite;
+    this.passengerAtlasSprite = passengerAtlasSprite?.image === this.playerSprite?.image
+      || passengerAtlasSprite?.image === this.passengerSprite?.image
+      || passengerAtlasSprite?.image === this.passengerFastSprite?.image
+      ? undefined
+      : passengerAtlasSprite;
   }
 
   static fromCanvas(
@@ -98,6 +128,26 @@ export class GameRenderer {
 
   render(state: GameState, level: LevelConfig, options: RenderOptions = {}): void {
     const screen = options.screen ?? (state.phase === 'result' ? 'result' : 'game');
+    if (screen === 'home') {
+      this.context.clear('#0b1627');
+      renderHomePage(this.context);
+      return;
+    }
+    if (screen === 'achievements') {
+      this.context.clear('#0b1627');
+      renderAchievementsPage(this.context, options.levels ?? [level], options.bestStars ?? {});
+      return;
+    }
+    if (screen === 'appearance') {
+      this.context.clear('#0b1627');
+      renderAppearancePage(this.context, options.appearanceId ?? 'default', options.unlockedAppearanceIds ?? ['default']);
+      return;
+    }
+    if (screen === 'settings') {
+      this.context.clear('#0b1627');
+      renderSettingsPage(this.context, options.settings ?? { soundEnabled: true, musicEnabled: true, vibrationEnabled: true });
+      return;
+    }
     if (screen === 'route') {
       this.context.clear('#0b1627');
       // 外部调用方可能暂时传入空路线（例如存档/热更新切换的瞬间）。
@@ -108,7 +158,16 @@ export class GameRenderer {
         routeLevels,
         options.unlockedLevelIds ?? [level.id],
         options.selectedLevelIndex ?? 0,
+        options.bestScores ?? {},
+        options.bestStars ?? {},
+        options.routeMenuExpanded ?? true,
+        options.routeScrollOffset ?? 0,
       );
+      return;
+    }
+    if (screen === 'briefing') {
+      this.context.clear('#0b1627');
+      renderLevelBriefing(this.context, level);
       return;
     }
 
@@ -123,7 +182,7 @@ export class GameRenderer {
     }
     this.context.clear('#0b1627');
     renderStation(this.context, level, state);
-    renderActors(this.context, state, level, this.playerSprite, this.passengerSprite);
+    renderActors(this.context, state, level, this.playerSprite, this.passengerSprite, this.passengerAtlasSprite, this.passengerFastSprite, options.appearanceId ?? 'default');
     renderEffects(this.context, level, state);
     renderHud(this.context, level, state);
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { GameRuntime } from '../src/runtime/index.ts';
 import { WxAudioAdapter } from '../src/platform/wx/index.ts';
-import { routeCardRect } from '../src/render/index.ts';
+import { menuButtonRect, routeListCardRect } from '../src/render/index.ts';
 
 class MockContext {
   fillStyle = '#000';
@@ -125,14 +125,17 @@ function createRecordingAudio() {
 test('M5 runtime 启动进入路线页，选关后只维护一条 ticker', () => {
   const wx = createMockWx();
   const runtime = new GameRuntime(wx, { seed: 7 });
-  assert.equal(runtime.screen, 'route');
+  assert.equal(runtime.screen, 'home');
   assert.equal(runtime.running, false);
   assert.equal(runtime.start(), true);
   assert.equal(runtime.start(), false);
   assert.equal(runtime.running, true);
   assert.equal(wx._frames.size, 1);
 
+  runtime.openRoute();
   assert.equal(runtime.selectLevel('sea-gate'), true);
+  assert.equal(runtime.screen, 'briefing');
+  assert.equal(runtime.confirmStart(), true);
   assert.equal(runtime.screen, 'game');
   assert.equal(runtime.selectedLevelId, 'sea-gate');
   runtime.stop();
@@ -144,8 +147,15 @@ test('M5 路线卡片触摸、摇杆输入和生命周期暂停可串联', () =>
   const wx = createMockWx();
   const runtime = new GameRuntime(wx, { seed: 11 });
   runtime.start();
-  const routeRect = routeCardRect(runtime.renderer.context.layout.viewport, 0);
-  wx._listeners.touchStart({ changedTouches: [{ identifier: 1, x: routeRect.x + 12, y: routeRect.y + 12 }] });
+  const startRect = menuButtonRect(runtime.renderer.context.layout.viewport, 0, 4);
+  wx._listeners.touchStart({ changedTouches: [{ identifier: 0, x: startRect.x + 12, y: startRect.y + 12 }] });
+  runtime.tick(0);
+  const routeRect = routeListCardRect(runtime.renderer.context.layout.viewport, 0, 0);
+  wx._listeners.touchStart({ changedTouches: [{ identifier: 2, x: routeRect.x + 12, y: routeRect.y + 12 }] });
+  wx._listeners.touchEnd({ changedTouches: [{ identifier: 2, x: routeRect.x + 12, y: routeRect.y + 12 }] });
+  runtime.tick(0);
+  const confirm = runtime.renderer.context.layout.briefingConfirmRect;
+  wx._listeners.touchStart({ changedTouches: [{ identifier: 3, x: confirm.x + 8, y: confirm.y + 8 }] });
   runtime.tick(0);
   assert.equal(runtime.screen, 'game');
   assert.equal(runtime.audio.unlocked, true);
@@ -173,6 +183,7 @@ test('M5 结算会保存最高分并解锁下一站，重试/下一站/返回路
   const wx = createMockWx();
   const runtime = new GameRuntime(wx, { seed: 11 });
   runtime.selectLevel('sea-gate');
+  runtime.confirmStart();
   runtime.state.player.position = {
     x: runtime.currentLevel.trainBounds.x + runtime.currentLevel.trainBounds.width / 2,
     y: runtime.currentLevel.trainBounds.y + runtime.currentLevel.trainBounds.height / 2,
@@ -180,7 +191,7 @@ test('M5 结算会保存最高分并解锁下一站，重试/下一站/返回路
   runUntilResult(runtime);
   assert.equal(runtime.screen, 'result');
   assert.equal(runtime.state.outcome, 'success');
-  assert.ok(runtime.saveData.unlockedLevelIds.includes('cloud-harbor'));
+  assert.ok(runtime.saveData.unlockedLevelIds.includes('lighthouse-bay'));
   assert.ok(Object.hasOwn(runtime.saveData.bestScores, 'sea-gate'));
 
   // 结算页的触摸重试命令和直接 API 保持同一条状态迁移路径。
@@ -196,21 +207,24 @@ test('M5 结算会保存最高分并解锁下一站，重试/下一站/返回路
   runUntilResult(runtime);
   assert.equal(runtime.state.outcome, 'success');
   assert.equal(runtime.nextLevel(), true);
+  assert.equal(runtime.screen, 'briefing');
+  assert.equal(runtime.confirmStart(), true);
   assert.equal(runtime.screen, 'game');
-  assert.equal(runtime.selectedLevelId, 'cloud-harbor');
+  assert.equal(runtime.selectedLevelId, 'lighthouse-bay');
   assert.equal(runtime.retry(), true);
   assert.equal(runtime.screen, 'game');
   runtime.backToRoute();
   assert.equal(runtime.screen, 'route');
 
   const persisted = new GameRuntime(wx, { seed: 11 });
-  assert.ok(persisted.saveData.unlockedLevelIds.includes('cloud-harbor'));
+  assert.ok(persisted.saveData.unlockedLevelIds.includes('lighthouse-bay'));
 });
 
 test('M5 运行时快照暴露当前事件并驱动几何反馈', () => {
   const wx = createMockWx();
   const runtime = new GameRuntime(wx, { seed: 44, fixedDelta: 1 / 30, maxFrameDelta: 10 });
   runtime.selectLevel('sea-gate');
+  runtime.confirmStart();
   runtime.tick(3.45);
   assert.equal(runtime.state?.activeEvent?.kind, 'rain');
   assert.equal(runtime.state?.activeEvent?.label, '伞流经过');
@@ -238,6 +252,7 @@ test('M6 运行时按事件播放一次音效，重试后重新从头计数', ()
   runtime.markUserGesture();
   assert.deepEqual(recording.played, ['music.wav']);
   runtime.selectLevel('sea-gate');
+  runtime.confirmStart();
   runtime.tick(3.45);
   assert.deepEqual(recording.played, ['music.wav', 'event.wav']);
   runtime.tick(0);
@@ -277,6 +292,7 @@ test('M6 缺少微信音频 API 时保持静默并继续推进', () => {
   assert.doesNotThrow(() => {
     runtime.markUserGesture();
     runtime.selectLevel('sea-gate');
+    runtime.confirmStart();
     runtime.tick(3.45);
   });
   assert.equal(runtime.audio.unlocked, true);

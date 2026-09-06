@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   GameSimulation,
+  CAMPAIGN_LEVELS,
+  calculateScore,
+  countObjectiveStars,
+  isAppearanceUnlocked,
   MVP_LEVELS,
   PhaseMachine,
   SeededRandom,
@@ -14,9 +18,63 @@ import {
   serializeSave,
   unlockLevel,
   updateBestScore,
+  updateBestStars,
+  unlockedAppearanceIds,
   updatePassengers,
   useGuideAbility,
 } from '../src/core/index.ts';
+
+test('正式战役包含 12 站且关卡 ID 唯一', () => {
+  assert.equal(CAMPAIGN_LEVELS.length, 12);
+  assert.equal(new Set(CAMPAIGN_LEVELS.map((level) => level.id)).size, 12);
+  assert.equal(CAMPAIGN_LEVELS.at(-1)?.id, 'morning-light');
+  assert.deepEqual(
+    CAMPAIGN_LEVELS.map((level) => level.passenger.count),
+    [44, 48, 52, 58, 64, 70, 76, 72, 82, 86, 94, 100],
+  );
+  assert.deepEqual(CAMPAIGN_LEVELS.map((level) => level.doors.length), [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2]);
+  assert.deepEqual(
+    CAMPAIGN_LEVELS
+      .map((level, index) => (level.events ?? []).some((event) => event.kind === 'luggage-cart') ? index + 1 : null)
+      .filter((index) => index !== null),
+    [5, 7, 10, 11, 12],
+  );
+  assert.equal(
+    CAMPAIGN_LEVELS.some((level) => level.objectives?.some((objective) => objective.id === 'no-collision')),
+    false,
+  );
+  assert.ok(CAMPAIGN_LEVELS.every((level) => level.passenger.alightingCount < level.passenger.count));
+});
+
+test('三星目标按通关指标计数，并写入每关最高星数', () => {
+  const simulation = new GameSimulation('sea-gate', 9);
+  const state = simulation.snapshot();
+  state.phase = 'result';
+  state.outcome = 'success';
+  state.metrics.alightingTotal = 10;
+  state.metrics.alightingExited = 8;
+  state.metrics.doorRemainingAtFinish = 3;
+  state.metrics.guideUses = 1;
+  assert.equal(countObjectiveStars(state, CAMPAIGN_LEVELS[0]), 3);
+  state.metrics.collisions = 100;
+  assert.equal(countObjectiveStars(state, CAMPAIGN_LEVELS[0]), 2);
+  state.outcome = 'failure';
+  assert.equal(countObjectiveStars(state, CAMPAIGN_LEVELS[0]), 0);
+  const save = updateBestStars(emptySave(), 'sea-gate', 3);
+  assert.equal(save.bestStars['sea-gate'], 3);
+  assert.equal(updateBestStars(save, 'sea-gate', 1).bestStars['sea-gate'], 3);
+});
+
+test('外观按通关、累计星数和战役进度逐级解锁', () => {
+  const save = emptySave();
+  assert.deepEqual(unlockedAppearanceIds(save), ['default']);
+  save.achievements.push('clear:sea-gate');
+  assert.equal(isAppearanceUnlocked(save, 'seafoam'), true);
+  save.bestStars = { 'sea-gate': 3, 'lighthouse-bay': 3 };
+  assert.equal(isAppearanceUnlocked(save, 'sunset'), true);
+  for (let index = 1; index <= 12; index += 1) save.achievements.push(`clear:level-${index}`);
+  assert.equal(isAppearanceUnlocked(save, 'night'), true);
+});
 
 test('相同种子产生完全相同的随机序列', () => {
   const first = new SeededRandom('m2-replay');
@@ -88,6 +146,7 @@ test('疏导只影响前方目标，并消耗体力和触发冷却', () => {
   assert.ok(result.affectedPassengerIds.includes(target.id));
   assert.ok(state.player.stamina < staminaBefore);
   assert.ok(state.player.abilityCooldown > 0);
+  assert.equal(state.player.abilityCooldown, 1);
   assert.notDeepEqual(target.position, before);
   const blocked = useGuideAbility(state, simulation.level, state.elapsed);
   assert.equal(blocked.used, false);
@@ -115,7 +174,7 @@ test('只有真正进入车厢内部才会成功，站在门外安全区会失�
   assert.equal(failureState.outcome, 'failure');
 });
 
-test('玩家只能从打开的选中车门进入车厢内部', () => {
+test('玩家只能从打开的车门进入车厢内部', () => {
   const level = cloneLevelConfig(MVP_LEVELS[0]);
   level.passenger.count = 0;
   level.passenger.alightingCount = 0;
@@ -138,6 +197,120 @@ test('玩家只能从打开的选中车门进入车厢内部', () => {
   assert.ok(state.player.position.y <= level.trainBounds.y + level.trainBounds.height - state.player.radius);
 });
 
+test('疏导最多影响两人，并按人流方向和敏感群组调整礼让值', () => {
+  const simulation = new GameSimulation('sea-gate', 19);
+  simulation.step(2.5);
+  const state = simulation.getState();
+  state.player.position = { x: 160, y: 120 };
+  state.player.facing = { x: 0, y: -1 };
+  const targets = state.passengers.filter((passenger) => passenger.role !== 'inside' && passenger.role !== 'exited').slice(0, 3);
+  assert.equal(targets.length, 3);
+  targets.forEach((passenger, index) => {
+    passenger.position = { x: 150, y: 72 + index * 8 };
+    passenger.target = { x: 160, y: 32 };
+  });
+  targets[0].role = 'alighting';
+  targets[0].kind = 'group';
+  targets[1].role = 'waiting';
+  targets[1].kind = 'regular';
+  targets[2].role = 'waiting';
+  targets[2].kind = 'regular';
+  const before = state.metrics.courtesyPoints;
+  const result = useGuideAbility(state, simulation.level, state.elapsed);
+  assert.equal(result.affectedPassengerIds.length, 2);
+  assert.ok(state.metrics.courtesyPoints < before, '敏感群组或被阻挡的人流应降低礼让值');
+});
+
+test('礼让分不会因高密度碰撞直接归零', () => {
+  const simulation = new GameSimulation('sea-gate', 2026);
+  const state = simulation.snapshot();
+  state.outcome = 'failure';
+  state.metrics.collisions = 40;
+  state.metrics.alightingTotal = 14;
+  state.metrics.alightingExited = 4;
+  state.metrics.courtesyPoints = -6;
+  const score = calculateScore(state, simulation.level);
+  assert.ok(score.courtesy > 0);
+  assert.equal(score.medal, 'none', '失败局不应发放奖牌');
+
+  state.metrics.collisions = 400;
+  state.metrics.alightingExited = 0;
+  assert.ok(calculateScore(state, simulation.level).courtesy >= 10);
+
+  state.metrics.collisions = 0;
+  state.metrics.alightingExited = state.metrics.alightingTotal;
+  state.metrics.courtesyPoints = 0;
+  assert.equal(calculateScore(state, simulation.level).courtesy, 100);
+});
+
+test('未选中的开放车门也允许玩家进入', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[2]);
+  level.passenger.count = 0;
+  level.passenger.alightingCount = 0;
+  const simulation = new GameSimulation(level, 1212);
+  const state = simulation.getState();
+  const leftDoor = level.doors.find((door) => door.id === 'a');
+  assert.ok(leftDoor);
+  assert.equal(state.player.selectedDoorId, 'b', '默认仍高亮推荐的 B 门');
+  state.player.position = { x: leftDoor.center.x, y: leftDoor.safeZone.y + 4 };
+
+  while (simulation.phase !== 'exiting') simulation.step(0.1, { move: { x: 0, y: 0 } });
+  for (let index = 0; index < 30 && !state.player.inCarriage; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: -1 } });
+  }
+  assert.equal(state.player.inCarriage, true);
+  assert.equal(state.player.selectedDoorId, 'b');
+});
+
+test('门输入不再改变推荐门状态', () => {
+  const simulation = new GameSimulation('cloud-harbor', 1213);
+  const state = simulation.getState();
+  const selected = state.player.selectedDoorId;
+  assert.equal(simulation.selectDoor('a'), true);
+  assert.equal(state.player.selectedDoorId, selected);
+});
+
+test('车厢容量达到上限时仍不阻挡玩家抓住门口空隙', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 0;
+  level.passenger.alightingCount = 0;
+  level.carriageCapacity = 0;
+  const simulation = new GameSimulation(level, 14);
+  const state = simulation.getState();
+  const door = level.doors[0];
+  state.player.position = { x: door.center.x, y: 10 };
+
+  while (simulation.phase !== 'exiting') simulation.step(0.1, { move: { x: 0, y: 0 } });
+  for (let index = 0; index < 12 && !state.player.inCarriage; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: -1 } });
+  }
+  assert.equal(state.doors[0].blocked, false);
+  assert.equal(state.player.inCarriage, true);
+});
+
+test('门洞有多名活动 NPC 时仍允许玩家通过', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 4;
+  level.passenger.alightingCount = 0;
+  level.carriageCapacity = 20;
+  const simulation = new GameSimulation(level, 1414);
+  const state = simulation.getState();
+  const door = level.doors[0];
+  assert.ok(door);
+
+  while (simulation.phase !== 'exiting') simulation.step(0.1, { move: { x: 0, y: 0 } });
+  for (const [index, passenger] of state.passengers.entries()) {
+    passenger.role = 'waiting';
+    passenger.position = { x: door.center.x + (index - 1.5) * 8, y: 30 };
+    passenger.target = { x: door.center.x, y: 24 };
+  }
+  state.player.position = { x: door.center.x, y: 72 };
+  for (let index = 0; index < 30 && !state.player.inCarriage; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: -1 } });
+  }
+  assert.equal(state.player.inCarriage, true);
+});
+
 test('下车乘客在车门打开前留在车厢内部，开门后才走出', () => {
   const level = cloneLevelConfig(MVP_LEVELS[0]);
   level.passenger.count = 1;
@@ -156,8 +329,34 @@ test('下车乘客在车门打开前留在车厢内部，开门后才走出', ()
   while (simulation.phase !== 'exiting') simulation.step(0.1);
   assert.equal(state.doors[0].open, true);
   const beforeExit = passenger.position.y;
-  simulation.step(1 / 30);
+  for (let index = 0; index < 120 && passenger.routeProgress < 1; index += 1) simulation.step(1 / 30);
+  assert.equal(passenger.role, 'alighting');
+  assert.equal(passenger.routeProgress, 1);
   assert.ok(passenger.position.y > beforeExit);
+  assert.equal(state.metrics.alightingExited, 1);
+  const crossedPosition = { ...passenger.position };
+  simulation.step(0.5);
+  assert.ok(passenger.position.y > crossedPosition.y, '下车完成后仍应继续向站台外侧行走');
+});
+
+test('车门打开后下车流与上车流同步移动', () => {
+  const level = cloneLevelConfig(MVP_LEVELS[0]);
+  level.passenger.count = 2;
+  level.passenger.alightingCount = 1;
+  const simulation = new GameSimulation(level, 1314);
+  const state = simulation.getState();
+  const waiting = state.passengers.find((passenger) => passenger.role === 'waiting');
+  assert.ok(waiting);
+  for (const passenger of state.passengers) {
+    if (passenger !== waiting) passenger.role = 'exited';
+  }
+  waiting.position = { x: level.doors[0].center.x, y: 500 };
+  waiting.target = { x: level.doors[0].center.x, y: 24 };
+
+  while (simulation.phase !== 'exiting') simulation.step(0.1);
+  const beforeBoardingFlow = waiting.position.y;
+  simulation.step(1 / 30);
+  assert.ok(waiting.position.y < beforeBoardingFlow, '上车流不应等待 boarding 阶段才开始移动');
 });
 
 test('阻塞车门不会让车内下车乘客提前移动', () => {
@@ -219,7 +418,7 @@ test('容量达到上限时，后续乘客不能继续无条件进入', () => {
   assert.ok(result.blockedAttempts >= 1);
   assert.equal(passengers.filter((passenger) => passenger.role === 'waiting').length, 2);
   let completedBoarding = 0;
-  for (let index = 0; index < 60; index += 1) completedBoarding += updatePassengers(passengers, context).boarded;
+  for (let index = 0; index < 120; index += 1) completedBoarding += updatePassengers(passengers, context).boarded;
   assert.equal(completedBoarding, 1);
   assert.equal(passengers.filter((passenger) => passenger.role === 'inside').length, 1);
 });
@@ -254,7 +453,7 @@ test('上车角色能穿过门槛并落在车厢内', () => {
   assert.ok(passenger.target.y >= level.trainBounds.y + 24, '上车目标不能贴近车厢顶端');
   assert.ok(passenger.target.y >= level.trainBounds.y + level.trainBounds.height - 132, '上车目标应保持在门后近处');
 
-  for (let index = 0; index < 60 && passenger.role !== 'inside'; index += 1) {
+  for (let index = 0; index < 120 && passenger.role !== 'inside'; index += 1) {
     simulation.step(1 / 30, { move: { x: 0, y: 0 } });
   }
   assert.equal(passenger.role, 'inside');
@@ -296,7 +495,7 @@ test('损坏或未来版本存档安全回退，正常存档可往返', () => {
   assert.deepEqual(parseSave({ version: 999, unlockedLevelIds: ['star-ring'] }), fallback);
 
   const old = parseSave({ version: 0, unlockedLevels: ['cloud-harbor'], scores: { 'sea-gate': 87 } });
-  assert.equal(old.version, 1);
+  assert.equal(old.version, 2);
   assert.ok(old.unlockedLevelIds.includes('sea-gate'));
   assert.equal(old.bestScores['sea-gate'], 87);
   const roundTrip = parseSave(serializeSave(old));
@@ -339,35 +538,75 @@ test('M5 雨天事件会收窄可行走横向空间，并在结束后恢复', ()
   assert.ok(state.events.some((event) => event.type === 'event-end'));
 });
 
-test('M5 临时换门会阻塞旧门、切换推荐入口并恢复', () => {
-  const simulation = new GameSimulation('cloud-harbor', 32);
+test('M5 提前关门会阻塞旧门并保持到本局结束', () => {
+  const simulation = new GameSimulation('qixia-garden', 32);
   simulation.step(4.25);
   const state = simulation.getState();
-  assert.equal(state.activeEvent?.kind, 'door-change');
-  assert.equal(state.recommendedDoorId, 'a');
+  assert.equal(state.activeEvent?.kind, 'door-close');
+  assert.equal(state.recommendedDoorId, simulation.level.recommendedDoorId);
+  assert.equal(state.player.selectedDoorId, simulation.level.recommendedDoorId);
+  assert.equal(state.doors.find((door) => door.id === 'b')?.blocked, false, '3 秒预警期间旧门仍开放');
+  assert.equal(state.doors.find((door) => door.id === 'a')?.blocked, false);
+  assert.equal(state.events.some((event) => event.type === 'event-door-close'), false);
+
+  simulation.step(2.4);
   assert.equal(state.doors.find((door) => door.id === 'b')?.blocked, true);
-  assert.ok(state.events.some((event) => event.type === 'event-door-change' && event.detail === 'b->a'));
+  assert.ok(state.events.some((event) => event.type === 'event-door-close' && event.detail === 'b->a'));
 
   simulation.step(3);
   assert.equal(state.activeEvent, null);
   assert.equal(state.recommendedDoorId, simulation.level.recommendedDoorId);
-  assert.equal(state.doors.find((door) => door.id === 'b')?.blocked, false);
+  assert.equal(state.doors.find((door) => door.id === 'b')?.blocked, true);
+  assert.equal(state.doors.find((door) => door.id === 'a')?.blocked, false);
 });
 
-test('M5 行李车事件会把玩家推出临时占用区域', () => {
+test('M5 提前关门期间已经排到旧门的 NPC 也不能继续进车', () => {
+  const simulation = new GameSimulation('qixia-garden', 321);
+  simulation.step(4.25);
+  const state = simulation.getState();
+  const passenger = state.passengers.find((item) => item.role === 'waiting');
+  assert.ok(passenger);
+  const oldDoor = simulation.level.doors.find((door) => door.id === 'b');
+  assert.ok(oldDoor);
+  passenger.role = 'boarding';
+  passenger.doorId = oldDoor.id;
+  passenger.desiredDoorId = oldDoor.id;
+  passenger.position = { x: oldDoor.center.x, y: -18 };
+  passenger.target = { x: oldDoor.center.x, y: -250 };
+  state.doors.find((door) => door.id === oldDoor.id).occupancy += 1;
+
+  simulation.step(2.4 + 1 / 30);
+  assert.equal(passenger.role, 'waiting');
+  assert.equal(passenger.doorId, undefined);
+  assert.equal(passenger.desiredDoorId, 'a');
+  assert.equal(state.doors.find((door) => door.id === 'b')?.occupancy, 0);
+  assert.ok(passenger.position.y >= passenger.radius, '撤回旧门的 NPC 应回到站台侧');
+});
+
+test('M5 行李车事件会以有限推力缓慢推开玩家', () => {
   const simulation = new GameSimulation('star-ring', 33);
   simulation.step(3.85);
   const state = simulation.getState();
   const zone = state.activeEvent?.zone;
   assert.equal(state.activeEvent?.kind, 'luggage-cart');
   assert.ok(zone);
+  const enteringX = zone.x;
+  assert.ok(enteringX < simulation.level.platformBounds.x, '行李车应从站台一侧驶入');
 
-  state.player.position = { x: zone.x + zone.width / 2, y: zone.y + zone.height / 2 };
+  simulation.step(2.35);
+  const currentZone = state.activeEvent?.zone;
+  assert.ok(currentZone);
+  state.player.position = { x: currentZone.x + currentZone.width / 2, y: currentZone.y + currentZone.height / 2 };
+  const beforeCartPush = { ...state.player.position };
   simulation.step(1 / 30);
-  const insideExpanded =
-    state.player.position.x >= zone.x - state.player.radius &&
-    state.player.position.x <= zone.x + zone.width + state.player.radius &&
-    state.player.position.y >= zone.y - state.player.radius &&
-    state.player.position.y <= zone.y + zone.height + state.player.radius;
-  assert.equal(insideExpanded, false);
+  const pushDistance = Math.hypot(
+    state.player.position.x - beforeCartPush.x,
+    state.player.position.y - beforeCartPush.y,
+  );
+  assert.ok(pushDistance > 0 && pushDistance < 6, '行李车应以有限推力缓慢推开角色');
+
+  const beforeSlowMoveX = zone.x;
+  simulation.step(0.5);
+  assert.ok(zone.x > enteringX, '行李车占用区应随车辆横向移动');
+  assert.ok(zone.x - beforeSlowMoveX < 60, '行李车半秒内不应快速冲过站台');
 });

@@ -7,12 +7,13 @@
                          ↘ GameRenderer
 ```
 
-规则层的 `LevelEventConfig` 会在运行时随局内时钟触发内容事件。当前三关分别
-演示雨天收窄横向空间、临时换门阻塞旧入口、行李车占用临时区域；事件状态由
+规则层的 `LevelEventConfig` 会在运行时随局内时钟触发内容事件。12 站战役覆盖
+雨天收窄横向空间、提前关门、行李车占用临时区域和散场快步人流；事件状态由
 `GameState.activeEvent` 暴露，渲染层只读该快照，不直接修改规则。
 
-运行时默认从 `MVP_LEVELS` 和 `WxStorageAdapter` 读取三关与进度，页面状态为
-`route`、`game`、`result`。`start()` 会幂等地绑定触摸、前后台和诊断监听，并只
+运行时默认从 `CAMPAIGN_LEVELS` 和 `WxStorageAdapter` 读取 12 站与进度，页面状态为
+`home`、`route`、`game`、`result`、`achievements`、`appearance`、`settings`。开始游戏后路线页
+只展示已解锁关卡，并通过下拉面板选择。`start()` 会幂等地绑定触摸、前后台和诊断监听，并只
 创建一个 ticker；测试可以不调用 `start()`，直接用 `tick(seconds)` 手动推进。
 
 M6 的 `DEFAULT_RUNTIME_AUDIO_SOURCES` 指向随包的程序化 WAV。首次有效触摸会

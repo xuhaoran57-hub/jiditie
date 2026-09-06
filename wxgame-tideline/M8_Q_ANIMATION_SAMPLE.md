@@ -18,7 +18,7 @@
 - 渲染层只读取快照，不向 `GameState` 写入动画字段。
 - `wx.createImage`、`drawImage` 不可用或解码失败时，自动回退到原有几何角色。
 - 图集帧宽为 64px：0 待机、1/2 行走、3 疏导挥手；疏导事件结束后自动回到待机/行走。
-- NPC 目前不依赖额外图片图集，使用 `NPC_VISUAL_PROFILES` + Canvas 几何绘制，便于后续统一替换为 atlas。
+- 六类 NPC 已补充统一 SVG 图集 `assets/generated/tideline-passenger-atlas.svg`；加载失败时仍回退到 `NPC_VISUAL_PROFILES` + Canvas 几何绘制。
 
 ## 验证
 
