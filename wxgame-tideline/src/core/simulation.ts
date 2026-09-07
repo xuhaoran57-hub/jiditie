@@ -39,7 +39,8 @@ const STEP_QUANTUM = 1 / 30;
 const PLAYABLE_PHASES = new Set(['positioning', 'exiting', 'boarding', 'warning']);
 const PLAYER_ACCELERATION = 10;
 const PLAYER_ORTHOGONAL_DAMPING = 22;
-const PLAYER_MAX_SPEED = 112;
+// 玩家速度先压低，给横屏满屏布局留出更从容的穿行和修正空间。
+const PLAYER_MAX_SPEED = 80;
 // 行李车是场景中的缓慢障碍物，速度低于乘客，避免短时事件把人流瞬间推散。
 const LUGGAGE_CART_SPEED = 72;
 
@@ -160,17 +161,22 @@ function makeCollisionActors(state: GameState, level: LevelConfig): { actors: Co
       position: copyVec(state.player.position),
       velocity: copyVec(state.player.velocity),
       radius: state.player.radius,
-      weight: 1.5,
+      // 门口是两股人流交汇的关键通行点。玩家不能被单个 NPC 的碰撞
+      // 轻易横向推离，否则即使持续向门内移动也会被卡在门线外。
+      // 提高玩家权重只改变碰撞分离的位移比例，不改变碰撞检测、礼让
+      // 计数或 NPC 之间的避让规则。
+      weight: 2,
       movable: true,
     },
   ];
-  // 已经到达门前并预留车位的角色进入单向 boarding 通道，不再和站在
-  // 安全区的玩家互相推挤；否则玩家为了完成进车判定会把乘客堵在门口。
+  // 已经到达门前并预留车位的角色不再参与 NPC-NPC 碰撞，避免排队人流
+  // 重新堆成墙；但门前 waiting NPC 仍保留与玩家的碰撞，保持人流推挤感。
   const passengers = activePassengers(state.passengers);
   const collisionPassengers = passengers.filter((passenger) =>
-    passenger.role !== 'boarding' && !isDoorApproach(passenger, level, state.doors),
+    passenger.role !== 'boarding',
   );
   for (const passenger of collisionPassengers) {
+    const playerOnly = isDoorApproach(passenger, level, state.doors);
     actors.push({
       id: passenger.id,
       position: copyVec(passenger.position),
@@ -178,6 +184,7 @@ function makeCollisionActors(state: GameState, level: LevelConfig): { actors: Co
       radius: passenger.radius,
       weight: passenger.weight,
       movable: true,
+      ...(playerOnly ? { playerOnly: true } : {}),
     });
   }
   return { actors, passengers };
@@ -221,7 +228,7 @@ export class GameSimulation {
     return Boolean(findDoor(this.level, doorId) && this.state.phase !== 'result');
   }
 
-  movePlayer(direction: Vec2, dt: number): void {
+  movePlayer(direction: Vec2, dt: number, moveScale = 1): void {
     if (this.state.phase === 'result') return;
     const safeDt = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const input = finiteVec(direction, vec());
@@ -242,7 +249,11 @@ export class GameSimulation {
       return;
     }
     this.state.player.facing = normalized;
-    const targetVelocity = scale(normalized, Math.min(PLAYER_MAX_SPEED, Math.max(0, this.state.player.speed)));
+    const targetSpeed = Math.min(PLAYER_MAX_SPEED, Math.max(0, this.state.player.speed));
+    const targetVelocity = scale(
+      normalized,
+      targetSpeed * Math.max(0.05, Number.isFinite(moveScale) ? moveScale : 1),
+    );
     // 参考原作的加速曲线，摇杆输入不会让角色瞬间达到最高速；慢半拍
     // 能让玩家在拥挤门口修正路线，也让碰撞后的回弹更有重量感。
     const blend = clamp(safeDt * PLAYER_ACCELERATION, 0, 1);
@@ -298,7 +309,7 @@ export class GameSimulation {
       );
 
       this.syncDoorStates();
-      if (PLAYABLE_PHASES.has(phaseBefore)) this.movePlayer(input.move ?? vec(), quantum);
+      if (PLAYABLE_PHASES.has(phaseBefore)) this.movePlayer(input.move ?? vec(), quantum, input.moveScale ?? 1);
       else this.state.player.velocity = vec();
       this.updatePlayerZones();
 

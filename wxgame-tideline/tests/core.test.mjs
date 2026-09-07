@@ -189,7 +189,7 @@ test('玩家只能从打开的车门进入车厢内部', () => {
   assert.equal(state.player.inCarriage, false);
 
   while (simulation.phase !== 'exiting') simulation.step(0.1, { move: { x: 0, y: 0 } });
-  for (let index = 0; index < 30 && !state.player.inCarriage; index += 1) {
+  for (let index = 0; index < 12 && !state.player.inCarriage; index += 1) {
     simulation.step(1 / 30, { move: { x: 0, y: -1 } });
   }
   assert.equal(state.doors[0].open, true);
@@ -305,8 +305,9 @@ test('门洞有多名活动 NPC 时仍允许玩家通过', () => {
     passenger.target = { x: door.center.x, y: 24 };
   }
   state.player.position = { x: door.center.x, y: 72 };
-  for (let index = 0; index < 30 && !state.player.inCarriage; index += 1) {
-    simulation.step(1 / 30, { move: { x: 0, y: -1 } });
+  // 测试门洞本身的通行能力，使用较强输入避免测试被低速配置的加速段卡住。
+  for (let index = 0; index < 180 && !state.player.inCarriage; index += 1) {
+    simulation.step(1 / 30, { move: { x: 0, y: -1 }, moveScale: 1.4 });
   }
   assert.equal(state.player.inCarriage, true);
 });

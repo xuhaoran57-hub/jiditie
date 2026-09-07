@@ -3,6 +3,7 @@ import { clamp, normalize } from '../core/vector.ts';
 import { fillRoundRect, RenderContext, strokeRoundRect } from './context.ts';
 import { TIDELINE_TOKENS } from './design-tokens.ts';
 import type { PlayerSpriteAsset } from './player-sprite.ts';
+import { playerAppearancePalette } from './player-appearance.ts';
 import { passengerSpriteFrame, type PassengerSpriteAsset } from './passenger-sprite.ts';
 
 interface CharacterPalette {
@@ -961,6 +962,84 @@ function drawPassenger(
   ctx.globalAlpha = alphaBefore;
 }
 
+function drawPlayerBody(context: RenderContext, appearanceId: string, stride = 0, guideLift = 0): void {
+  const { ctx } = context;
+  const palette = playerAppearancePalette(appearanceId);
+  // 玩家专属背包、靴子和当前外观配色的外套。
+  fillRoundRect(ctx, -8, -1, 5, 12, 2, '#28445a');
+  ctx.strokeStyle = palette.shirt;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-6, 1);
+  ctx.lineTo(-6, 8);
+  ctx.stroke();
+  ctx.strokeStyle = '#162638';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(-2.8, 7);
+  ctx.lineTo(-3.1 + stride, 13);
+  ctx.moveTo(2.8, 7);
+  ctx.lineTo(3.1 - stride, 13);
+  ctx.stroke();
+  ctx.strokeStyle = '#07121e';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(-3.1 + stride, 13);
+  ctx.lineTo(-5.8 + stride, 13);
+  ctx.moveTo(3.1 - stride, 13);
+  ctx.lineTo(5.8 - stride, 13);
+  ctx.stroke();
+  fillRoundRect(ctx, -6.4, -1, 12.8, 12, 4.2, palette.shadow);
+  fillRoundRect(ctx, -5.3, -2.8, 10.6, 10, 3.5, palette.shirt);
+  ctx.fillStyle = palette.highlight;
+  ctx.globalAlpha = 0.78;
+  ctx.fillRect(-1, -1, 2, 7);
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = palette.shadow;
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(-3.2, -1);
+  ctx.lineTo(0, 2);
+  ctx.lineTo(3.2, -1);
+  ctx.stroke();
+  ctx.strokeStyle = '#f2c7a5';
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(-5.2, 0);
+  ctx.lineTo(-7.8, 4 - stride * 0.45 - guideLift);
+  ctx.moveTo(5.2, 0);
+  ctx.lineTo(7.8, 4 + stride * 0.45 - guideLift);
+  ctx.stroke();
+  drawCircle(context, { x: 0, y: -7.8 }, 5, '#f3c5a2', TIDELINE_TOKENS.color.outline, 1.7);
+  ctx.fillStyle = '#152c44';
+  ctx.beginPath();
+  ctx.arc(0, -9.1, 5.2, Math.PI * 1.02, Math.PI * 1.98);
+  ctx.lineTo(4.2, -8.5);
+  ctx.lineTo(-4.2, -8.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = palette.highlight;
+  ctx.fillRect(-4.8, -8.5, 9.6, 1.5);
+  fillRoundRect(ctx, 2.7, 0.5, 4.3, 5.2, 1, '#f5cb66');
+  ctx.fillStyle = '#fff4c6';
+  ctx.fillRect(3.5, 1.3, 2.7, 1.2);
+}
+
+/** 屏幕坐标预览复用游戏内 Sprite 和几何回退，不应用世界缩放。 */
+export function drawPlayerPreview(context: RenderContext, appearanceId: string, sprite: PlayerSpriteAsset | undefined, x: number, y: number, size: number): void {
+  const { ctx } = context;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (!sprite || !drawPlayerSprite(context, sprite, 0, size)) {
+    ctx.scale(size / 32, size / 32);
+    drawPlayerBody(context, appearanceId);
+  }
+  ctx.restore();
+}
+
+
 function drawPlayer(
   context: RenderContext,
   state: GameState,
@@ -1004,13 +1083,7 @@ function drawPlayer(
   ctx.scale(visualScale * squash, visualScale * (1 - (squash - 1)));
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  const appearanceAccent = appearanceId === 'sunset'
-    ? '#ff9a58'
-    : appearanceId === 'night'
-      ? '#7799ff'
-      : appearanceId === 'seafoam'
-        ? '#55d8c4'
-        : '#36c8bb';
+  const appearanceAccent = playerAppearancePalette(appearanceId).shirt;
   if (appearanceId !== 'default') {
     ctx.save();
     ctx.globalAlpha = 0.34;
@@ -1031,67 +1104,7 @@ function drawPlayer(
     : false;
 
   if (!spriteDrawn) {
-  // 玩家专属背包、靴子和潮汐青外套。
-  fillRoundRect(ctx, -8, -1, 5, 12, 2, '#28445a');
-  ctx.strokeStyle = '#67d8d0';
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(-6, 1);
-  ctx.lineTo(-6, 8);
-  ctx.stroke();
-  ctx.strokeStyle = '#162638';
-  ctx.lineWidth = 3.5;
-  ctx.beginPath();
-  ctx.moveTo(-2.8, 7);
-  ctx.lineTo(-3.1 + stride, 13);
-  ctx.moveTo(2.8, 7);
-  ctx.lineTo(3.1 - stride, 13);
-  ctx.stroke();
-  ctx.strokeStyle = '#07121e';
-  ctx.lineWidth = 2.4;
-  ctx.beginPath();
-  ctx.moveTo(-3.1 + stride, 13);
-  ctx.lineTo(-5.8 + stride, 13);
-  ctx.moveTo(3.1 - stride, 13);
-  ctx.lineTo(5.8 - stride, 13);
-  ctx.stroke();
-  fillRoundRect(ctx, -6.4, -1, 12.8, 12, 4.2, '#167c83');
-  fillRoundRect(ctx, -5.3, -2.8, 10.6, 10, 3.5, '#36c8bb');
-  ctx.fillStyle = '#d9fff5';
-  ctx.globalAlpha = 0.78;
-  ctx.fillRect(-1, -1, 2, 7);
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = '#0b5e6a';
-  ctx.lineWidth = 1.3;
-  ctx.beginPath();
-  ctx.moveTo(-3.2, -1);
-  ctx.lineTo(0, 2);
-  ctx.lineTo(3.2, -1);
-  ctx.stroke();
-  const guideLift = guideStrength > 0
-    ? 2 + Math.sin(state.elapsed * 18) * 1.5
-    : 0;
-  ctx.strokeStyle = '#f2c7a5';
-  ctx.lineWidth = 2.6;
-  ctx.beginPath();
-  ctx.moveTo(-5.2, 0);
-  ctx.lineTo(-7.8, 4 - stride * 0.45 - guideLift);
-  ctx.moveTo(5.2, 0);
-  ctx.lineTo(7.8, 4 + stride * 0.45 - guideLift);
-  ctx.stroke();
-  drawCircle(context, { x: 0, y: -7.8 }, 5, '#f3c5a2', TIDELINE_TOKENS.color.outline, 1.7);
-  ctx.fillStyle = '#152c44';
-  ctx.beginPath();
-  ctx.arc(0, -9.1, 5.2, Math.PI * 1.02, Math.PI * 1.98);
-  ctx.lineTo(4.2, -8.5);
-  ctx.lineTo(-4.2, -8.5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#8df0df';
-  ctx.fillRect(-4.8, -8.5, 9.6, 1.5);
-  fillRoundRect(ctx, 2.7, 0.5, 4.3, 5.2, 1, '#f5cb66');
-  ctx.fillStyle = '#fff4c6';
-  ctx.fillRect(3.5, 1.3, 2.7, 1.2);
+    drawPlayerBody(context, appearanceId, stride, guideStrength > 0 ? 2 + Math.sin(state.elapsed * 18) * 1.5 : 0);
   }
   ctx.restore();
 

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import { GameRuntime } from '../src/runtime/index.ts';
 import { WxAudioAdapter } from '../src/platform/wx/index.ts';
-import { menuButtonRect, routeListCardRect } from '../src/render/index.ts';
+import { appearanceCardRect, menuButtonRect, routeListCardRect } from '../src/render/index.ts';
+import { emptySave, serializeSave } from '../src/core/save-schema.ts';
 
 class MockContext {
   fillStyle = '#000';
@@ -121,6 +122,28 @@ function createRecordingAudio() {
   });
   return { audio, played };
 }
+
+test('外观预览卡片触摸能装备并持久化，未解锁外观不能装备', () => {
+  for (const [width, height] of [[480, 320], [667, 375], [375, 667]]) {
+    const wx = createMockWx();
+    wx.getWindowInfo = () => ({ windowWidth: width, windowHeight: height, pixelRatio: 1 });
+    const save = emptySave();
+    save.achievements.push('clear:sea-gate');
+    wx.setStorageSync('tideline.save.v1', serializeSave(save));
+    const runtime = new GameRuntime(wx);
+    runtime.start();
+    runtime.openAppearance();
+    assert.equal(runtime.setAppearance('night'), false);
+    const card = appearanceCardRect(runtime.renderer.context.layout.viewport, 1);
+    wx._listeners.touchStart({ changedTouches: [{ identifier: 1, x: card.x + card.width / 2, y: card.y + card.height / 2 }] });
+    runtime.tick(0);
+    assert.equal(runtime.saveData.appearanceId, 'seafoam');
+    runtime.stop();
+    const reloaded = new GameRuntime(wx);
+    assert.equal(reloaded.saveData.appearanceId, 'seafoam');
+    reloaded.stop();
+  }
+});
 
 test('M5 runtime 启动进入路线页，选关后只维护一条 ticker', () => {
   const wx = createMockWx();

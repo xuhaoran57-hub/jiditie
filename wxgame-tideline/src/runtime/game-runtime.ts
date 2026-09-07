@@ -45,6 +45,7 @@ import type {
 } from '../platform/wx/index.ts';
 import {
   GameRenderer,
+  appearanceCardRect,
   menuButtonRect,
   pageBackRect,
   routeCardRect,
@@ -266,7 +267,7 @@ export class GameRuntime {
         canvasAdapter.viewport.dpr,
         canvasAdapter.viewport.insets,
         this.levels[0],
-        { imageFactory: canvasAdapter.imageFactory },
+        { imageFactory: canvasAdapter.imageFactory, canvasFactory: canvasAdapter.offscreenCanvasFactory },
       );
     } else {
       throw new Error('GameRuntime requires a renderer or canvasAdapter');
@@ -936,6 +937,12 @@ export class GameRuntime {
     const input = this.input.sample();
     const layout = this.renderer.context.layout;
     if (layout.orientation !== 'landscape' || !input.move) return input;
+    const scaleX = Math.max(0.05, Math.abs(layout.worldScaleX));
+    const scaleY = Math.max(0.05, Math.abs(layout.worldScaleY));
+    const compensated = {
+      x: input.move.x / scaleX,
+      y: input.move.y / scaleY,
+    };
     return {
       ...input,
       move: screenDirectionToWorld(
@@ -944,6 +951,10 @@ export class GameRuntime {
         layout.worldScaleX,
         layout.worldScaleY,
       ),
+      // screenDirectionToWorld normalizes the compensated direction. Preserve
+      // its original magnitude so the final rendered X/Y displacement remains
+      // proportional to the screen-space input after the non-uniform canvas scale.
+      moveScale: Math.hypot(compensated.x, compensated.y),
     };
   }
 
@@ -991,7 +1002,7 @@ export class GameRuntime {
         .filter((id) => unlocked.has(id))
         .map((id) => ({
           id,
-          rect: menuButtonRect(layout.viewport, ['default', 'seafoam', 'sunset', 'night'].indexOf(id), 4),
+          rect: appearanceCardRect(layout.viewport, ['default', 'seafoam', 'sunset', 'night'].indexOf(id)),
         }));
     } else if (this.screenValue === 'game') {
       base.joystickCenter = layout.joystickCenter;

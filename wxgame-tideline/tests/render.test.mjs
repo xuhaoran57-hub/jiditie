@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { drawPlayerPreview } from '../src/render/actor-renderer.ts';
+import { playerAppearancePalette } from '../src/render/player-appearance.ts';
 
 import { CARRIAGE_THEMES, GameSimulation, MVP_LEVELS } from '../src/core/index.ts';
 import { DebugInputController, FixedTimestepLoop } from '../src/platform/debug/index.ts';
@@ -489,6 +491,37 @@ test('player Sprite loads asynchronously, switches frames, and keeps geometry fa
   renderer.render(state, level, { showControls: false });
   const spriteCallsAfterFailure = context.operations.filter(([name]) => name === 'drawImage').length;
   assert.equal(spriteCallsAfterFailure, 2, 'failed image decoding should use geometry fallback');
+});
+
+test('外观页四套预览与游戏使用同一份换色图集，锁定外观仍可预览', () => {
+  const context = new MockContext();
+  const image = { width: 256, height: 64, complete: true };
+  const renderer = GameRenderer.fromCanvas(makeCanvas(context), 480, 320, 1, {}, MVP_LEVELS[0], {
+    imageFactory: () => image,
+    canvasFactory: () => ({ width: 0, height: 0, getContext: () => ({
+      drawImage() {}, getImageData: () => ({ data: new Uint8ClampedArray([54, 200, 187, 255]), width: 1, height: 1 }), putImageData() {},
+    }) }),
+  });
+  const state = new GameSimulation(MVP_LEVELS[0], 1).getState();
+  state.passengers = [];
+  renderer.render(state, MVP_LEVELS[0], { screen: 'appearance', appearanceId: 'sunset', unlockedAppearanceIds: ['default', 'sunset'] });
+  const previews = context.operations.filter(([name]) => name === 'drawImage');
+  assert.equal(previews.length, 4);
+  assert.equal(new Set(previews.map((op) => op[1])).size, 4);
+  assert.equal(context.operations.filter(([name, text]) => name === 'fillText' && text === '未解锁').length, 2);
+  renderer.render(state, MVP_LEVELS[0], { appearanceId: 'sunset', showControls: false });
+  assert.equal(context.operations.filter(([name]) => name === 'drawImage').at(-1)[1], previews[2][1]);
+});
+
+test('外观预览图片缺失时使用对应配色的人物而非原色占位', () => {
+  for (const id of ['default', 'seafoam', 'sunset', 'night']) {
+    const context = new MockContext();
+    const colors = [];
+    context.fill = () => colors.push(context.fillStyle);
+    const renderContext = new RenderContext(context, createViewportMetrics(480, 320), { x: 0, y: 0, width: 320, height: 568 });
+    drawPlayerPreview(renderContext, id, undefined, 50, 50, 64);
+    assert.ok(colors.includes(playerAppearancePalette(id).shirt));
+  }
 });
 
 test('regular passenger Sprite loads, animates movement/guide, and falls back on decode failure', () => {

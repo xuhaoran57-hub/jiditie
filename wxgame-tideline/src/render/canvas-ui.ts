@@ -1,6 +1,9 @@
 import type { GameState, LevelConfig, SaveSettings, ScoreResult } from '../core/types.ts';
 import { clamp } from '../core/vector.ts';
 import type { Canvas2DContextLike } from './context.ts';
+import { APPEARANCE_OPTIONS } from '../core/appearance.ts';
+import { drawPlayerPreview } from './actor-renderer.ts';
+import type { PlayerSpriteAsset } from './player-sprite.ts';
 import {
   drawCenteredText,
   fillRoundRect,
@@ -9,6 +12,7 @@ import {
   routeListRect,
   routeListCardRect,
   menuButtonRect,
+  appearanceCardRect,
   pageBackRect,
   worldDirectionToScreen,
   strokeRoundRect,
@@ -593,43 +597,31 @@ export function renderAchievementsPage(
   });
 }
 
-export function renderAppearancePage(renderContext: RenderContext, appearanceId: string, unlockedAppearanceIds: readonly string[] = ['default']): void {
+export function renderAppearancePage(renderContext: RenderContext, appearanceId: string, unlockedAppearanceIds: readonly string[] = ['default'], spriteFor?: (id: string) => PlayerSpriteAsset | undefined): void {
   const { ctx, layout } = renderContext;
   const content = layout.viewport.contentRect;
-  const appearances = [
-    ['default', '基础通勤装', '#63d5c0', '默认开放'],
-    ['seafoam', '海风薄荷', '#55d8c4', '通关海风门'],
-    ['sunset', '晚霞橙', '#ff9a58', '累计获得 6 颗星'],
-    ['night', '夜行蓝', '#7799ff', '完成 12 站战役'],
-  ] as const;
   renderContext.withScreen(() => {
     ctx.fillStyle = '#0b1627';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
     renderPageButton(renderContext, pageBackRect(layout.viewport), '返回');
     drawCenteredText(ctx, '外观更换', { x: content.x + content.width / 2, y: content.y + 38 }, canvasFont(800, 26), UI.text);
-    appearances.forEach(([id, label, color, condition], index) => {
-      const card = menuButtonRect(layout.viewport, index, appearances.length);
+    drawCenteredText(ctx, '预览全部外观 · 点击已解锁外观装备', { x: content.x + content.width / 2, y: content.y + 67 }, canvasFont(400, 11), UI.muted);
+    APPEARANCE_OPTIONS.forEach(({ id, label, condition }, index) => {
+      const card = appearanceCardRect(layout.viewport, index);
       const unlocked = unlockedAppearanceIds.includes(id);
       fillRoundRect(ctx, card.x, card.y, card.width, card.height, 12, UI.panel);
       strokeRoundRect(ctx, card.x, card.y, card.width, card.height, 12, id === appearanceId ? UI.accent : '#30415c', id === appearanceId ? 2 : 1);
-      ctx.globalAlpha = unlocked ? 1 : 0.5;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(card.x + 28, card.y + card.height / 2, 10, 0, Math.PI * 2);
-      ctx.fill();
+      const previewSize = Math.min(76, card.height - 12);
+      drawPlayerPreview(renderContext, id, spriteFor?.(id), card.x + 42, card.y + card.height / 2, previewSize);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.font = canvasFont(600, 14);
       ctx.fillStyle = UI.text;
-      ctx.fillText(label, card.x + 48, card.y + card.height * 0.4);
+      ctx.fillText(label, card.x + 84, card.y + card.height * 0.3, card.width - 94);
       ctx.font = canvasFont(400, 10);
       ctx.fillStyle = unlocked ? UI.muted : UI.warning;
-      ctx.fillText(unlocked ? condition : `未解锁 · ${condition}`, card.x + 48, card.y + card.height * 0.7);
-      if (id === appearanceId && unlocked) {
-        ctx.textAlign = 'right';
-        ctx.fillStyle = UI.accent;
-        ctx.fillText('已使用', card.x + card.width - 14, card.y + card.height / 2);
-      }
+      ctx.fillText(condition, card.x + 84, card.y + card.height * 0.55, card.width - 94);
+      ctx.fillText(unlocked ? (id === appearanceId ? '已使用' : '点击使用') : '未解锁', card.x + 84, card.y + card.height * 0.8, card.width - 94);
       ctx.globalAlpha = 1;
     });
   });

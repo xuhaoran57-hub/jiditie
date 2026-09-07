@@ -126,6 +126,13 @@ export function resolveCollisions(
       const candidates = hash.queryCircle(actor.position, actor.radius + maxRadius + 1);
       for (const other of candidates) {
         if (actor.id >= other.id) continue;
+        // 门前排队的 NPC 不应彼此重新堆成墙，但仍要和玩家发生碰撞，
+        // 这样后方人流可以继续给玩家提供真实的前后推挤反馈。
+        if (
+          actor.id !== 'player'
+          && other.id !== 'player'
+          && (actor.playerOnly || other.playerOnly)
+        ) continue;
         const delta = sub(actor.position, other.position);
         const actualDistance = length(delta);
         const minimumDistance = Math.max(0, actor.radius) + Math.max(0, other.radius);
@@ -139,8 +146,17 @@ export function resolveCollisions(
         const normal =
           actualDistance > 1e-7 ? scale(delta, 1 / actualDistance) : deterministicNormal(actor.id, other.id);
         const overlap = Math.max(0.001, minimumDistance - actualDistance);
-        const inverseA = actor.movable === false ? 0 : 1 / Math.max(0.01, actor.weight);
-        const inverseB = other.movable === false ? 0 : 1 / Math.max(0.01, other.weight);
+        const playerOnlyPair =
+          (actor.id === 'player' && other.playerOnly)
+          || (other.id === 'player' && actor.playerOnly);
+        // 门前 NPC 与玩家碰撞时只移动玩家；NPC 自身保持排队航线，
+        // 这样它仍能推挤玩家，但不会因为玩家站在安全区而无法切换 boarding。
+        const inverseA = playerOnlyPair && actor.id !== 'player'
+          ? 0
+          : actor.movable === false ? 0 : 1 / Math.max(0.01, actor.weight);
+        const inverseB = playerOnlyPair && other.id !== 'player'
+          ? 0
+          : other.movable === false ? 0 : 1 / Math.max(0.01, other.weight);
         const inverseTotal = inverseA + inverseB;
         if (inverseTotal <= 0) continue;
 
@@ -154,9 +170,16 @@ export function resolveCollisions(
         const normalSpeed = dot(relative, normal);
         if (normalSpeed < 0) {
           // 降低碰撞后的反向回弹，避免连续帧在同一对角色之间左右震荡。
-          const impulse = normalSpeed * 0.55;
-          if (actor.movable !== false) actor.velocity = sub(actor.velocity, scale(normal, impulse));
-          if (other.movable !== false) other.velocity = add(other.velocity, scale(normal, impulse));
+          // 门前 waiting NPC 仍需推挤玩家，但不应把较慢的玩家锁死在门线外。
+          // 只降低玩家-NPC 的反向回弹，NPC-NPC/其他碰撞保持原有反馈。
+          const impulse = normalSpeed * (playerOnlyPair ? 0.2 : 0.55);
+          if (playerOnlyPair) {
+            if (actor.id === 'player') actor.velocity = sub(actor.velocity, scale(normal, impulse));
+            else if (other.id === 'player') other.velocity = add(other.velocity, scale(normal, impulse));
+          } else {
+            if (actor.movable !== false) actor.velocity = sub(actor.velocity, scale(normal, impulse));
+            if (other.movable !== false) other.velocity = add(other.velocity, scale(normal, impulse));
+          }
         }
       }
     }

@@ -1,6 +1,7 @@
 import type { GameState, LevelConfig, Rect, SaveSettings } from '../core/types.ts';
 import { renderActors } from './actor-renderer.ts';
-import type { CanvasImageFactory, CanvasLike, ViewportInsets } from './context.ts';
+import type { CanvasFactory, CanvasImageFactory, CanvasLike, ViewportInsets } from './context.ts';
+import { PlayerAppearanceSprites } from './player-appearance.ts';
 import {
   createViewportMetrics,
   configureCanvas,
@@ -45,6 +46,7 @@ export interface RenderOptions {
 export interface RenderAssetOptions {
   /** 可选的微信图片工厂；未提供或解码失败时继续使用几何角色。 */
   imageFactory?: CanvasImageFactory;
+  canvasFactory?: CanvasFactory;
   playerSprite?: PlayerSpriteAsset;
   passengerSprite?: PassengerSpriteAsset;
   passengerFastSprite?: PassengerSpriteAsset;
@@ -69,6 +71,7 @@ export class GameRenderer {
   readonly context: RenderContext;
   private readonly canvas?: CanvasLike;
   readonly playerSprite?: PlayerSpriteAsset;
+  private readonly appearanceSprites: PlayerAppearanceSprites;
   readonly passengerSprite?: PassengerSpriteAsset;
   readonly passengerFastSprite?: PassengerSpriteAsset;
   readonly passengerAtlasSprite?: PassengerSpriteAsset;
@@ -80,6 +83,7 @@ export class GameRenderer {
   ) {
     this.context = context;
     this.canvas = canvas;
+    this.appearanceSprites = new PlayerAppearanceSprites(assets.canvasFactory);
     const passengerSprite = assets.passengerSprite
       ?? loadPassengerRegularSprite(assets.imageFactory);
     const passengerFastSprite = assets.passengerFastSprite
@@ -140,7 +144,8 @@ export class GameRenderer {
     }
     if (screen === 'appearance') {
       this.context.clear('#0b1627');
-      renderAppearancePage(this.context, options.appearanceId ?? 'default', options.unlockedAppearanceIds ?? ['default']);
+      renderAppearancePage(this.context, options.appearanceId ?? 'default', options.unlockedAppearanceIds ?? ['default'],
+        (id) => this.appearanceSprites.get(this.playerSprite, id));
       return;
     }
     if (screen === 'settings') {
@@ -182,7 +187,8 @@ export class GameRenderer {
     }
     this.context.clear('#0b1627');
     renderStation(this.context, level, state);
-    renderActors(this.context, state, level, this.playerSprite, this.passengerSprite, this.passengerAtlasSprite, this.passengerFastSprite, options.appearanceId ?? 'default');
+    const appearanceId = options.appearanceId ?? 'default';
+    renderActors(this.context, state, level, this.appearanceSprites.get(this.playerSprite, appearanceId), this.passengerSprite, this.passengerAtlasSprite, this.passengerFastSprite, appearanceId);
     renderEffects(this.context, level, state);
     renderHud(this.context, level, state);
 

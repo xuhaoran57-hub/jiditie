@@ -279,6 +279,8 @@ export interface GameState {
 
 export interface SimulationInput {
   move?: Vec2;
+  /** 输入来源需要补偿渲染坐标缩放时使用；缺省为 1。 */
+  moveScale?: number;
   selectDoorId?: string;
   useGuide?: boolean;
 }
@@ -296,6 +298,8 @@ export interface CollisionActor {
   radius: number;
   weight: number;
   movable?: boolean;
+  /** 只与玩家发生碰撞；用于门前已排队、但仍可推挤玩家的 NPC。 */
+  playerOnly?: boolean;
 }
 
 export interface PassengerUpdateContext {

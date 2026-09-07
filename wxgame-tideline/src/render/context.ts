@@ -2,6 +2,8 @@ import type { Rect, Vec2 } from '../core/types.ts';
 import { clamp } from '../core/vector.ts';
 
 export interface Canvas2DContextLike {
+  getImageData?(x: number, y: number, width: number, height: number): { data: Uint8ClampedArray; width: number; height: number };
+  putImageData?(data: { data: Uint8ClampedArray; width: number; height: number }, x: number, y: number): void;
   save(): void;
   restore(): void;
   translate(x: number, y: number): void;
@@ -122,6 +124,7 @@ export interface CanvasImageLike {
 }
 
 export type CanvasImageFactory = () => CanvasImageLike;
+export type CanvasFactory = () => CanvasLike;
 
 function finiteScale(value: number | undefined, fallback = 1): number {
   return Number.isFinite(value) && value !== undefined && Math.abs(value) > 1e-8
@@ -412,6 +415,22 @@ export function routeListCardRect(viewport: ViewportMetrics, index: number, scro
   const gap = 10;
   const height = viewport.contentRect.width >= viewport.contentRect.height ? 66 : 74;
   return { x: list.x, y: list.y + Math.max(0, Math.floor(index)) * (height + gap) - Math.max(0, scrollOffset), width: list.width, height };
+}
+
+/** 外观页独立布局：卡片预览和触摸命中共用，窄横屏也使用两列。 */
+export function appearanceCardRect(viewport: ViewportMetrics, index: number): Rect {
+  const content = viewport.contentRect;
+  const columns = content.width >= content.height ? 2 : 1;
+  const gap = 12;
+  const width = Math.min(340, (content.width - 32 - gap * (columns - 1)) / columns);
+  const rows = 4 / columns;
+  const height = Math.min(100, (content.height - 106 - gap * (rows - 1)) / rows);
+  return {
+    x: content.x + (content.width - width * columns - gap * (columns - 1)) / 2 + (index % columns) * (width + gap),
+    y: content.y + 90 + Math.floor(index / columns) * (height + gap),
+    width,
+    height,
+  };
 }
 
 export function menuButtonRect(viewport: ViewportMetrics, index: number, count = 4): Rect {

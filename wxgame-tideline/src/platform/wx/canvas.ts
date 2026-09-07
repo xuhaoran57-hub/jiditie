@@ -1,5 +1,6 @@
 import type {
   CanvasImageFactory,
+  CanvasFactory,
   CanvasImageLike,
   Canvas2DContextLike,
   CanvasLike,
@@ -30,6 +31,7 @@ export interface WxWindowInfoLike {
 /** 只声明本适配器实际使用的微信能力，便于 Node mock 和版本兼容。 */
 export interface WxCanvasApi {
   createCanvas(): CanvasLike;
+  createOffscreenCanvas?: (options: { type: '2d'; width: number; height: number }) => CanvasLike;
   /** 微信小游戏通过 wx.createImage 提供本地图片解码；缺失时由渲染层使用几何回退。 */
   createImage?: () => CanvasImageLike;
   getWindowInfo?: () => WxWindowInfoLike;
@@ -143,6 +145,16 @@ export class WxCanvasAdapter {
 
   get imageFactory(): CanvasImageFactory | undefined {
     return this.api.createImage?.bind(this.api);
+  }
+
+  get offscreenCanvasFactory(): CanvasFactory {
+    return () => {
+      const canvas = this.api.createOffscreenCanvas
+        ? this.api.createOffscreenCanvas({ type: '2d', width: 256, height: 64 })
+        : this.api.createCanvas();
+      if (canvas === this.canvas) throw new Error('appearance canvas must not be the screen canvas');
+      return canvas;
+    };
   }
 
   /** 重新读取窗口/安全区信息并同步 Canvas 物理像素尺寸。 */

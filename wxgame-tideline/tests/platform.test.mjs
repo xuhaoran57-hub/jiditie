@@ -98,6 +98,25 @@ test('微信 Canvas 适配器暴露可选图片工厂', () => {
   assert.equal(adapter.imageFactory?.(), image);
 });
 
+test('外观缓存优先使用离屏 Canvas，旧版回退不会修改主画布', () => {
+  const screen = makeCanvas();
+  const offscreen = makeCanvas();
+  const adapter = new WxCanvasAdapter({
+    createCanvas: () => screen,
+    createOffscreenCanvas(options) {
+      assert.deepEqual(options, { type: '2d', width: 256, height: 64 });
+      return offscreen;
+    },
+  });
+  assert.equal(adapter.offscreenCanvasFactory(), offscreen);
+  const fallback = new WxCanvasAdapter({ createCanvas: () => makeCanvas() });
+  assert.notEqual(fallback.offscreenCanvasFactory(), fallback.canvas);
+  const reused = new WxCanvasAdapter({ createCanvas: () => screen });
+  const dimensions = [screen.width, screen.height];
+  assert.throws(() => reused.offscreenCanvasFactory(), /must not be the screen canvas/);
+  assert.deepEqual([screen.width, screen.height], dimensions);
+});
+
 test('微信触摸适配器支持多指摇杆、按钮命中和滑出/取消释放', () => {
   const listeners = {};
   const api = {
