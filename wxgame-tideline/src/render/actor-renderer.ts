@@ -302,15 +302,16 @@ function drawPassengerSprite(
     compensateLandscapeScale(context);
     const visualScale = actorVisualScale(context, baseScale);
     ctx.scale(visualScale, visualScale);
+    const sourceWidth = frame.sourceWidth ?? frame.width;
     ctx.drawImage(
       sprite.image,
       frame.sx,
       frame.sy,
-      frame.width,
+      sourceWidth,
       frame.height,
       -size / 2,
       -size / 2,
-      size,
+      size * sourceWidth / frame.width,
       size,
     );
     ctx.restore();
@@ -869,6 +870,7 @@ function drawPassenger(
   passengerSprite?: PassengerSpriteAsset,
   passengerAtlasSprite?: PassengerSpriteAsset,
   passengerFastSprite?: PassengerSpriteAsset,
+  passengerLuggageSprite?: PassengerSpriteAsset,
 ): void {
   const { ctx } = context;
   const palette = PASSENGER_PALETTES[passenger.kind];
@@ -885,11 +887,14 @@ function drawPassenger(
   // 快步客有独立 PNG，但微信低版本/缓存异常时可能只让该图片失败；
   // 此时必须切到同一套 PNG 六行图集，否则会一直拿着失败对象而不尝试图集行。
   const fastSpriteReady = Boolean(passengerFastSprite && passengerFastSprite.ready && !passengerFastSprite.failed);
+  const luggageSpriteReady = Boolean(passengerLuggageSprite && passengerLuggageSprite.ready && !passengerLuggageSprite.failed);
   const spriteAsset = passenger.kind === 'regular'
     ? passengerSprite
-    : passenger.kind === 'fast'
-      ? (fastSpriteReady ? passengerFastSprite : passengerAtlasSprite ?? passengerFastSprite)
-      : passengerAtlasSprite;
+    : passenger.kind === 'luggage'
+      ? (luggageSpriteReady ? passengerLuggageSprite : passengerAtlasSprite ?? passengerLuggageSprite)
+      : passenger.kind === 'fast'
+        ? (fastSpriteReady ? passengerFastSprite : passengerAtlasSprite ?? passengerFastSprite)
+        : passengerAtlasSprite;
   const spriteBaseScale = Math.max(0.76, Math.min(1.65, (passenger.radius / 9) * (inside || boarding ? 1.1 : 1)));
   const spriteSize = 32;
   const alphaBefore = ctx.globalAlpha;
@@ -1161,6 +1166,7 @@ export function renderActors(
   passengerAtlasSprite?: PassengerSpriteAsset,
   passengerFastSprite?: PassengerSpriteAsset,
   appearanceId = 'default',
+  passengerLuggageSprite?: PassengerSpriteAsset,
 ): void {
   renderContext.withWorld(() => {
     // 关门时不绘制车内/下车中的角色；开门后才让他们从门洞中出现。
@@ -1172,7 +1178,7 @@ export function renderActors(
         if (left.role !== 'inside' && right.role === 'inside') return 1;
         return left.position.y - right.position.y;
       });
-    for (const passenger of passengers) drawPassenger(renderContext, passenger, state.elapsed, passengerSprite, passengerAtlasSprite, passengerFastSprite);
+    for (const passenger of passengers) drawPassenger(renderContext, passenger, state.elapsed, passengerSprite, passengerAtlasSprite, passengerFastSprite, passengerLuggageSprite);
     drawPlayer(renderContext, state, playerSprite, appearanceId);
   });
 }

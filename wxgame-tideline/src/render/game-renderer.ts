@@ -22,7 +22,7 @@ import {
 } from './canvas-ui.ts';
 import { renderStation } from './station-renderer.ts';
 import { loadPlayerSprite, type PlayerSpriteAsset } from './player-sprite.ts';
-import { loadPassengerAtlasSprite, loadPassengerFastSprite, loadPassengerRegularSprite, type PassengerSpriteAsset } from './passenger-sprite.ts';
+import { loadPassengerAtlasSprite, loadPassengerFastSprite, loadPassengerLuggageSprite, loadPassengerRegularSprite, type PassengerSpriteAsset } from './passenger-sprite.ts';
 
 export type RenderScreen = 'home' | 'game' | 'route' | 'briefing' | 'result' | 'achievements' | 'appearance' | 'settings';
 
@@ -50,6 +50,7 @@ export interface RenderAssetOptions {
   playerSprite?: PlayerSpriteAsset;
   passengerSprite?: PassengerSpriteAsset;
   passengerFastSprite?: PassengerSpriteAsset;
+  passengerLuggageSprite?: PassengerSpriteAsset;
   passengerAtlasSprite?: PassengerSpriteAsset;
 }
 
@@ -74,6 +75,7 @@ export class GameRenderer {
   private readonly appearanceSprites: PlayerAppearanceSprites;
   readonly passengerSprite?: PassengerSpriteAsset;
   readonly passengerFastSprite?: PassengerSpriteAsset;
+  readonly passengerLuggageSprite?: PassengerSpriteAsset;
   readonly passengerAtlasSprite?: PassengerSpriteAsset;
 
   constructor(
@@ -88,6 +90,8 @@ export class GameRenderer {
       ?? loadPassengerRegularSprite(assets.imageFactory);
     const passengerFastSprite = assets.passengerFastSprite
       ?? loadPassengerFastSprite(assets.imageFactory);
+    const passengerLuggageSprite = assets.passengerLuggageSprite
+      ?? loadPassengerLuggageSprite(assets.imageFactory);
     const passengerAtlasSprite = assets.passengerAtlasSprite
       ?? loadPassengerAtlasSprite(assets.imageFactory);
     this.playerSprite = assets.playerSprite ?? loadPlayerSprite(assets.imageFactory);
@@ -100,9 +104,15 @@ export class GameRenderer {
       || passengerFastSprite?.image === this.passengerSprite?.image
       ? undefined
       : passengerFastSprite;
+    this.passengerLuggageSprite = passengerLuggageSprite?.image === this.playerSprite?.image
+      || passengerLuggageSprite?.image === this.passengerSprite?.image
+      || passengerLuggageSprite?.image === this.passengerFastSprite?.image
+      ? undefined
+      : passengerLuggageSprite;
     this.passengerAtlasSprite = passengerAtlasSprite?.image === this.playerSprite?.image
       || passengerAtlasSprite?.image === this.passengerSprite?.image
       || passengerAtlasSprite?.image === this.passengerFastSprite?.image
+      || passengerAtlasSprite?.image === this.passengerLuggageSprite?.image
       ? undefined
       : passengerAtlasSprite;
   }
@@ -188,7 +198,7 @@ export class GameRenderer {
     this.context.clear('#0b1627');
     renderStation(this.context, level, state);
     const appearanceId = options.appearanceId ?? 'default';
-    renderActors(this.context, state, level, this.appearanceSprites.get(this.playerSprite, appearanceId), this.passengerSprite, this.passengerAtlasSprite, this.passengerFastSprite, appearanceId);
+    renderActors(this.context, state, level, this.appearanceSprites.get(this.playerSprite, appearanceId), this.passengerSprite, this.passengerAtlasSprite, this.passengerFastSprite, appearanceId, this.passengerLuggageSprite);
     renderEffects(this.context, level, state);
     renderHud(this.context, level, state);
 

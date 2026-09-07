@@ -8,6 +8,7 @@ export const ART_ASSET_PATHS = {
   playerSprite: 'assets/generated/tideline-player-sprite.png',
   passengerRegularSprite: 'assets/generated/tideline-passenger-regular-sprite.png',
   passengerFastSprite: 'assets/generated/tideline-passenger-fast-sprite.png',
+  passengerLuggageSprite: 'assets/generated/tideline-passenger-luggage-sprite.png',
   passengerAtlas: 'assets/generated/tideline-passenger-atlas.png',
 } as const;
 

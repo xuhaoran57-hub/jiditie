@@ -7,6 +7,8 @@ export interface PassengerSpriteFrame {
   sy: number;
   width: number;
   height: number;
+  /** 实际采样宽度；width 仍为原始帧宽，用于保持角色比例和锚点。 */
+  sourceWidth?: number;
 }
 
 export interface PassengerSpriteAsset {
@@ -37,7 +39,11 @@ export function passengerSpriteFrame(
   const frame = sprite.frames[frameIndex % sprite.frames.length];
   if (!frame) return undefined;
   const row = sprite.atlasRows > 1 ? PASSENGER_SPRITE_ROWS[kind] ?? 0 : 0;
-  return { ...frame, sy: frame.sy + row * frame.height };
+  // 共享图集的行李箱行来自同一 PNG，也需要排除原图中的游离像素。
+  const sourceWidth = kind === 'luggage'
+    ? PASSENGER_LUGGAGE_SPRITE_FRAMES[frameIndex % sprite.frames.length]?.sourceWidth
+    : frame.sourceWidth;
+  return { ...frame, sy: frame.sy + row * frame.height, sourceWidth };
 }
 
 /** NPC 4 帧图集：待机、左右行走和疏导挥手。 */
@@ -48,6 +54,16 @@ export const PASSENGER_REGULAR_SPRITE_FRAMES: readonly PassengerSpriteFrame[] = 
   { sx: 192, sy: 0, width: 64, height: 64 },
 ];
 
+// 原 PNG 的两张行走帧包含游离像素：第 2 帧位于 x=54..60、y=9..44，
+// 第 3 帧位于 x=55..60、y=21..32。人物和原箱体分别止于 x=53、x=50。
+// 只缩短这两帧的采样范围，保留 64px 逻辑尺寸，待机/挥手帧完整采样。
+export const PASSENGER_LUGGAGE_SPRITE_FRAMES: readonly PassengerSpriteFrame[] = [
+  { sx: 0, sy: 0, width: 64, height: 64 },
+  { sx: 64, sy: 0, width: 64, height: 64, sourceWidth: 54 },
+  { sx: 128, sy: 0, width: 64, height: 64, sourceWidth: 54 },
+  { sx: 192, sy: 0, width: 64, height: 64 },
+];
+
 function imageLooksReady(image: CanvasImageLike): boolean {
   return image.complete === true
     || ((image.width ?? 0) > 0 && (image.height ?? 0) > 0);
@@ -55,7 +71,7 @@ function imageLooksReady(image: CanvasImageLike): boolean {
 
 function loadPassengerSprite(
   factory: CanvasImageFactory | undefined,
-  assetPath: 'passengerRegularSprite' | 'passengerFastSprite' | 'passengerAtlas',
+  assetPath: 'passengerRegularSprite' | 'passengerFastSprite' | 'passengerLuggageSprite' | 'passengerAtlas',
 ): PassengerSpriteAsset | undefined {
   if (!factory) return undefined;
   let image: CanvasImageLike;
@@ -67,7 +83,9 @@ function loadPassengerSprite(
   if (!image || typeof image !== 'object') return undefined;
   const asset: PassengerSpriteAsset = {
     image,
-    frames: PASSENGER_REGULAR_SPRITE_FRAMES,
+    frames: assetPath === 'passengerLuggageSprite'
+      ? PASSENGER_LUGGAGE_SPRITE_FRAMES
+      : PASSENGER_REGULAR_SPRITE_FRAMES,
     atlasRows: assetPath === 'passengerAtlas' ? 6 : 1,
     frameDuration: 0.1,
     ready: false,
@@ -98,6 +116,13 @@ export function loadPassengerFastSprite(
   factory?: CanvasImageFactory,
 ): PassengerSpriteAsset | undefined {
   return loadPassengerSprite(factory, 'passengerFastSprite');
+}
+
+/** 加载带行李箱的独立四帧 PNG，按帧描述排除原图中的游离像素。 */
+export function loadPassengerLuggageSprite(
+  factory?: CanvasImageFactory,
+): PassengerSpriteAsset | undefined {
+  return loadPassengerSprite(factory, 'passengerLuggageSprite');
 }
 
 /** 加载六类 NPC 的 PNG 图集；失败时由 actor-renderer 回退 SVG/几何造型。 */

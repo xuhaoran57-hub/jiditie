@@ -363,8 +363,8 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
     }
     const buttons = [
       { rect: layout.resultRetryRect, label: '\u91cd\u8bd5', color: UI.accent },
-      { rect: layout.resultNextRect, label: '\u4e0b\u4e00\u7ad9', color: score?.success ? UI.gold : UI.muted },
-      { rect: layout.resultRouteRect, label: '\u8def\u7ebf', color: UI.muted },
+      ...(score?.success ? [{ rect: layout.resultNextRect, label: '\u4e0b\u4e00\u7ad9', color: UI.gold }] : []),
+      { rect: score?.success ? layout.resultRouteRect : layout.resultNextRect, label: '\u8def\u7ebf', color: UI.muted },
     ];
     for (const button of buttons) {
       fillRoundRect(ctx, button.rect.x, button.rect.y, button.rect.width, button.rect.height, 10, UI.panelAlt);
@@ -423,8 +423,8 @@ export function renderResultScreen(renderContext: RenderContext, level: LevelCon
     }
     const buttons = [
       { rect: layout.resultRetryRect, label: '重试', color: UI.accent },
-      { rect: layout.resultNextRect, label: '下一站', color: score?.success ? UI.gold : UI.muted },
-      { rect: layout.resultRouteRect, label: '路线', color: UI.muted },
+      ...(score?.success ? [{ rect: layout.resultNextRect, label: '下一站', color: UI.gold }] : []),
+      { rect: score?.success ? layout.resultRouteRect : layout.resultNextRect, label: '路线', color: UI.muted },
     ];
     for (const button of buttons) {
       fillRoundRect(ctx, button.rect.x, button.rect.y, button.rect.width, button.rect.height, 10, UI.panelAlt);
@@ -447,6 +447,18 @@ export function renderPauseOverlay(renderContext: RenderContext): void {
     ctx.globalAlpha = 1;
     drawCenteredText(ctx, '已暂停', { x: layout.viewport.width / 2, y: layout.viewport.height / 2 - 14 }, canvasFont(700, 24), UI.text);
     drawCenteredText(ctx, '再次点击暂停 / 按 Esc 继续', { x: layout.viewport.width / 2, y: layout.viewport.height / 2 + 20 }, canvasFont(400, 13), UI.muted);
+    const buttons = [
+      { rect: layout.resultRetryRect, label: '重新开始', color: UI.accent },
+      { rect: layout.resultRouteRect, label: '主菜单', color: UI.muted },
+    ];
+    for (const button of buttons) {
+      fillRoundRect(ctx, button.rect.x, button.rect.y, button.rect.width, button.rect.height, 10, UI.panelAlt);
+      strokeRoundRect(ctx, button.rect.x, button.rect.y, button.rect.width, button.rect.height, 10, button.color, 1);
+      drawCenteredText(ctx, button.label, {
+        x: button.rect.x + button.rect.width / 2,
+        y: button.rect.y + button.rect.height / 2,
+      }, canvasFont(600, 12), UI.text);
+    }
   });
 }
 

@@ -744,7 +744,8 @@ export class GameRuntime {
           flowChanged = this.nextLevel() || flowChanged;
           break;
         case 'route':
-          this.backToRoute();
+          if (this.screenValue === 'game' && this.userPaused) this.backToHome();
+          else this.backToRoute();
           flowChanged = true;
           break;
         case 'back':
@@ -1009,10 +1010,19 @@ export class GameRuntime {
       base.joystickRadius = layout.joystickRadius;
       base.guideButtonRect = layout.guideButtonRect;
       base.pauseButtonRect = layout.pauseButtonRect;
+      if (this.userPaused) {
+        base.resultRetryRect = layout.resultRetryRect;
+        base.resultRouteRect = layout.resultRouteRect;
+      }
     } else {
       base.resultRetryRect = layout.resultRetryRect;
-      base.resultNextRect = layout.resultNextRect;
-      base.resultRouteRect = layout.resultRouteRect;
+      if (this.state?.score?.success) {
+        base.resultNextRect = layout.resultNextRect;
+        base.resultRouteRect = layout.resultRouteRect;
+      } else {
+        // 失败结算只保留“重试”和“路线”，不让隐藏的下一关区域响应触摸。
+        base.resultRouteRect = layout.resultNextRect;
+      }
     }
     this.input.setLayout(base);
   }

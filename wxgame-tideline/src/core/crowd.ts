@@ -250,12 +250,10 @@ function spawnWithoutOverlap(
   return candidate;
 }
 
-function chooseDoor(doors: DoorConfig[], random: RandomSource, preferred?: string): DoorConfig {
+function chooseDoor(doors: DoorConfig[], random: RandomSource): DoorConfig {
   if (doors.length === 0) throw new Error('a level must contain at least one door');
-  if (preferred && random.next() < 0.55) {
-    const found = doors.find((item) => item.id === preferred);
-    if (found) return found;
-  }
+  // 双门关卡不再把推荐门当成人流偏置。推荐门只服务于玩家 UI，
+  // 乘客每次独立抽取目标门，让左右客流在不同种子下自然变化。
   return doors[random.int(0, doors.length - 1)]!;
 }
 
@@ -272,7 +270,7 @@ export function createPassengers(level: LevelConfig, random: RandomSource): Pass
     const isAlighting = index < alightingCount;
     const kind = weightedKind(level.passenger.kindWeights, random);
     const style = profile(kind);
-    const selectedDoor = chooseDoor(level.doors, random, level.recommendedDoorId);
+    const selectedDoor = chooseDoor(level.doors, random);
     // 下车客从对应车门内侧的窄区域生成，形成开门瞬间的拥挤门口。
     // 多门关卡会按各自目标门分组，避免人流横跨整节车厢。
     const alightingWidth = Math.min(train.width, Math.max(selectedDoor.width * 1.8, 76));

@@ -85,6 +85,24 @@ test('相同种子产生完全相同的随机序列', () => {
   assert.deepEqual(createPassengers(MVP_LEVELS[1], new SeededRandom(42)), createPassengers(MVP_LEVELS[1], new SeededRandom(42)));
 });
 
+test('双门关卡的下车和上车客流会随机分布到左右两门', () => {
+  const level = CAMPAIGN_LEVELS.find((item) => item.doors.length === 2);
+  assert.ok(level);
+  const countByDoor = (seed, start, end) => {
+    const passengers = createPassengers(level, new SeededRandom(seed)).slice(start, end);
+    return Object.fromEntries(level.doors.map((door) => [
+      door.id,
+      passengers.filter((passenger) => passenger.desiredDoorId === door.id).length,
+    ]));
+  };
+  const alightingA = countByDoor(1, 0, level.passenger.alightingCount);
+  const alightingB = countByDoor(2, 0, level.passenger.alightingCount);
+  const boardingA = countByDoor(1, level.passenger.alightingCount, level.passenger.count);
+  const boardingB = countByDoor(3, level.passenger.alightingCount, level.passenger.count);
+  assert.ok(alightingA.a > alightingA.b && alightingB.b > alightingB.a);
+  assert.ok(boardingA.a > boardingA.b && boardingB.b > boardingB.a);
+});
+
 test('阶段按时推进，并在关门时根据是否进入车厢成功或失败', () => {
   const machine = new PhaseMachine({
     phaseDurations: { intro: 0.1, arriving: 0.1, positioning: 0.1, exiting: 0.1 },

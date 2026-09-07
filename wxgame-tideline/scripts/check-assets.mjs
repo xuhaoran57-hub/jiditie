@@ -12,6 +12,7 @@ const requiredFiles = [
   'generated/tideline-player-sprite.png',
   'generated/tideline-passenger-regular-sprite.png',
   'generated/tideline-passenger-fast-sprite.png',
+  'generated/tideline-passenger-luggage-sprite.png',
   'generated/tideline-passenger-atlas.svg',
   'generated/tideline-passenger-atlas.png',
   'audio/tideline-loop.wav',
@@ -87,6 +88,7 @@ function checkSpritePng(relative, label, expectedHeight = 64) {
 checkSpritePng('generated/tideline-player-sprite.png', '玩家 Sprite');
 checkSpritePng('generated/tideline-passenger-regular-sprite.png', '普通 NPC Sprite');
 checkSpritePng('generated/tideline-passenger-fast-sprite.png', '快步 NPC Sprite');
+checkSpritePng('generated/tideline-passenger-luggage-sprite.png', '行李 NPC Sprite');
 checkSpritePng('generated/tideline-passenger-atlas.png', 'NPC PNG 图集', 384);
 
 try {
