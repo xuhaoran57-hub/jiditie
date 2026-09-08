@@ -30,7 +30,7 @@ test('正式战役包含 12 站且关卡 ID 唯一', () => {
   assert.equal(CAMPAIGN_LEVELS.at(-1)?.id, 'morning-light');
   assert.deepEqual(
     CAMPAIGN_LEVELS.map((level) => level.passenger.count),
-    [44, 48, 52, 58, 64, 70, 76, 72, 82, 86, 94, 100],
+    [44, 48, 52, 58, 64, 70, 88, 86, 104, 104, 108, 108],
   );
   assert.deepEqual(CAMPAIGN_LEVELS.map((level) => level.doors.length), [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2]);
   assert.deepEqual(

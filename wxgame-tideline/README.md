@@ -146,6 +146,17 @@ npm run check:release
 npm run check:release:strict
 ```
 
+### 难度评估（仅开发环境）
+
+`scripts/evaluate-difficulty.mjs` 会复用规则模拟器，按固定种子批量运行 12 关和三种玩家策略，输出通关率、三星率、平均分、碰撞、疏导、上/下车比例和失败阶段等指标，并额外给出成功局的条件均值。它位于 `scripts/`，构建脚本不会把该目录复制到 `dist/`，因此不会增加小游戏包体。
+
+```text
+npm run evaluate:difficulty -- --seeds=100
+node --experimental-strip-types scripts/evaluate-difficulty.mjs --seeds=100 > tmp/difficulty.json
+```
+
+结果用于平衡和回归，不替代真机体验测试；策略模型或规则变化后应重新生成报告。
+
 当前审计结果为“测试包可用”：包体约 431.6 KB、`dist/` 约 263.7 KB，未发现外链或调试接口；
 当前配置已使用非占位 AppID，但项目最终 LICENSE、真机矩阵和主体隐私/适龄材料仍待负责人确认，
 因此不能直接称为生产发布包。正式发布前运行
