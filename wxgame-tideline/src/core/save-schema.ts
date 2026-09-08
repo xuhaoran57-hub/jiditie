@@ -1,6 +1,6 @@
 import type { SaveData, SaveSettings } from './types.ts';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const CURRENT_SAVE_VERSION = SAVE_VERSION;
 export const DEFAULT_FIRST_LEVEL = 'sea-gate';
 
@@ -36,6 +36,9 @@ export function emptySave(): SaveData {
   return {
     version: SAVE_VERSION,
     unlockedLevelIds: [DEFAULT_FIRST_LEVEL],
+    endlessUnlocked: false,
+    endlessBestWave: 0,
+    endlessBestScore: 0,
     bestScores: {},
     bestStars: {},
     achievements: [],
@@ -74,6 +77,9 @@ function sanitize(value: Record<string, unknown>): SaveData {
   return {
     version: SAVE_VERSION,
     unlockedLevelIds: unlocked,
+    endlessUnlocked: value.endlessUnlocked === true || unlocked.includes('endless'),
+    endlessBestWave: finiteInteger(value.endlessBestWave, fallback.endlessBestWave),
+    endlessBestScore: Math.round(Math.min(100, Math.max(0, Number(value.endlessBestScore) || 0))),
     bestScores: scoreMap(value.bestScores ?? value.scores),
     bestStars: starsMap(value.bestStars),
     achievements: stringList(value.achievements),
@@ -141,5 +147,21 @@ export function setAppearance(save: SaveData, appearanceId: string): SaveData {
 export function unlockLevel(save: SaveData, levelId: string): SaveData {
   const next = migrateSave(save);
   if (levelId && !next.unlockedLevelIds.includes(levelId)) next.unlockedLevelIds.push(levelId);
+  return next;
+}
+
+export function unlockEndless(save: SaveData): SaveData {
+  const next = migrateSave(save);
+  next.endlessUnlocked = true;
+  if (!next.unlockedLevelIds.includes('endless')) next.unlockedLevelIds.push('endless');
+  return next;
+}
+
+export function updateEndlessRecord(save: SaveData, wave: number, score: number): SaveData {
+  const next = migrateSave(save);
+  const safeWave = finiteInteger(wave, 0);
+  const safeScore = Math.round(Math.min(100, Math.max(0, Number(score) || 0)));
+  next.endlessBestWave = Math.max(next.endlessBestWave, safeWave);
+  next.endlessBestScore = Math.max(next.endlessBestScore, safeScore);
   return next;
 }

@@ -1,11 +1,16 @@
 import {
   GameSimulation,
   CAMPAIGN_LEVELS,
+  ENDLESS_LEVEL,
+  ENDLESS_LEVEL_ID,
+  createEndlessLevel,
   migrateSave,
   unlockedAppearanceIds,
   isAppearanceUnlocked,
   setAppearance,
   unlockLevel,
+  unlockEndless,
+  updateEndlessRecord,
   updateBestScore,
   updateBestStars,
 } from '../core/index.ts';
@@ -124,6 +129,10 @@ export interface RuntimeSnapshot {
   selectedLevelIndex: number;
   selectedLevelId: string;
   unlockedLevelIds: string[];
+  endlessUnlocked: boolean;
+  endlessWave: number;
+  endlessBestWave: number;
+  endlessBestScore: number;
   bestScores: Record<string, number>;
   bestStars: Record<string, number>;
   achievements: string[];
@@ -206,6 +215,8 @@ export class GameRuntime {
   private selectedLevelIndexValue = 0;
   private routeMenuExpanded = false;
   private routeScrollOffset = 0;
+  private endlessActive = false;
+  private endlessWave = 0;
   private saveValue: SaveData;
   private simulation?: GameSimulation;
   private currentSeed: number | string;
@@ -245,7 +256,12 @@ export class GameRuntime {
       ? { ...second, api: first }
       : first;
     const api = options.api ?? options.wx;
-    this.levels = options.levels && options.levels.length > 0 ? options.levels : CAMPAIGN_LEVELS;
+    const configuredLevels = options.levels && options.levels.length > 0 ? options.levels : CAMPAIGN_LEVELS;
+    // 仅完整战役显示无尽模式入口；MVP/压力测试注入的临时关卡保持原有索引。
+    this.levels = configuredLevels.some((level) => level.id === 'morning-light')
+      && !configuredLevels.some((level) => level.id === ENDLESS_LEVEL_ID)
+      ? [...configuredLevels, ENDLESS_LEVEL]
+      : configuredLevels;
     this.baseSeed = options.seed ?? DEFAULT_SEED;
     this.now = options.now ?? (() => Date.now());
     this.audioSources = {
@@ -337,6 +353,7 @@ export class GameRuntime {
   get currentLevel(): LevelConfig {
     const level = this.levels[this.selectedLevelIndexValue] ?? this.levels[0];
     if (!level) throw new Error('GameRuntime requires at least one level');
+    if (level.id === ENDLESS_LEVEL_ID && this.endlessWave > 0) return createEndlessLevel(this.endlessWave);
     return level;
   }
 
@@ -446,6 +463,13 @@ export class GameRuntime {
     const index = this.resolveLevelIndex(levelOrIndex);
     if (index < 0 || !this.isUnlocked(this.levels[index]?.id)) return false;
     this.selectedLevelIndexValue = index;
+    if (this.levels[index]?.id === ENDLESS_LEVEL_ID) {
+      this.endlessActive = false;
+      this.endlessWave = 1;
+    } else {
+      this.endlessActive = false;
+      this.endlessWave = 0;
+    }
     this.screenValue = 'briefing';
     this.simulation = undefined;
     this.previewState = new GameSimulation(this.currentLevel, this.seedForLevel(this.currentLevel.id)).snapshot();
@@ -478,6 +502,11 @@ export class GameRuntime {
 
   nextLevel(): boolean {
     if (this.screenValue !== 'result' || this.state?.outcome !== 'success') return false;
+    if (this.endlessActive && this.currentLevel.id === ENDLESS_LEVEL_ID) {
+      this.endlessWave += 1;
+      this.startEndlessWave();
+      return true;
+    }
     const nextIndex = this.selectedLevelIndexValue + 1;
     if (nextIndex >= this.levels.length) return false;
     const nextId = this.levels[nextIndex]?.id;
@@ -490,6 +519,8 @@ export class GameRuntime {
     this.routeMenuExpanded = false;
     this.routeScrollOffset = 0;
     this.simulation = undefined;
+    this.endlessActive = false;
+    this.endlessWave = 0;
     this.audioEventCursor = 0;
     this.resultRecorded = false;
     this.userPaused = false;
@@ -505,6 +536,8 @@ export class GameRuntime {
     this.screenValue = 'home';
     this.routeMenuExpanded = false;
     this.simulation = undefined;
+    this.endlessActive = false;
+    this.endlessWave = 0;
     this.audioEventCursor = 0;
     this.resultRecorded = false;
     this.userPaused = false;
@@ -633,6 +666,10 @@ export class GameRuntime {
       selectedLevelIndex: this.selectedLevelIndexValue,
       selectedLevelId: this.currentLevel.id,
       unlockedLevelIds: this.unlockedLevelIds(),
+      endlessUnlocked: this.saveValue.endlessUnlocked,
+      endlessWave: this.endlessWave,
+      endlessBestWave: this.saveValue.endlessBestWave,
+      endlessBestScore: this.saveValue.endlessBestScore,
       bestScores: { ...this.saveValue.bestScores },
       bestStars: { ...this.saveValue.bestStars },
       achievements: [...this.saveValue.achievements],
@@ -654,7 +691,8 @@ export class GameRuntime {
   }
 
   private normalizeSave(value: SaveData): SaveData {
-    const next = migrateSave(value);
+    let next = migrateSave(value);
+    if (next.achievements.includes('clear:morning-light')) next = unlockEndless(next);
     const firstId = this.levels[0]?.id;
     if (firstId && !next.unlockedLevelIds.includes(firstId)) next.unlockedLevelIds.unshift(firstId);
     return next;
@@ -679,20 +717,22 @@ export class GameRuntime {
   }
 
   private isUnlocked(levelId: string | undefined): boolean {
+    if (levelId === ENDLESS_LEVEL_ID) return this.saveValue.endlessUnlocked;
     return Boolean(levelId && this.saveValue.unlockedLevelIds.includes(levelId));
   }
 
   private unlockedLevelIds(): string[] {
     const known = new Set(this.levels.map((level) => level.id));
-    return this.saveValue.unlockedLevelIds.filter((id) => known.has(id));
+    return this.saveValue.unlockedLevelIds
+      .filter((id) => known.has(id) && (id !== ENDLESS_LEVEL_ID || this.saveValue.endlessUnlocked));
   }
 
   private seedForLevel(levelId: string): number | string {
     if (typeof this.baseSeed === 'number') {
       const index = Math.max(0, this.levels.findIndex((level) => level.id === levelId));
-      return (this.baseSeed + index * 1009) >>> 0;
+      return (this.baseSeed + index * 1009 + (levelId === ENDLESS_LEVEL_ID ? this.endlessWave * 7919 : 0)) >>> 0;
     }
-    return `${this.baseSeed}:${levelId}`;
+    return `${this.baseSeed}:${levelId}:${levelId === ENDLESS_LEVEL_ID ? this.endlessWave : ''}`;
   }
 
   private startLevelAt(index: number): boolean {
@@ -700,8 +740,11 @@ export class GameRuntime {
     const level = this.levels[safe];
     if (!level || !this.isUnlocked(level.id)) return false;
     this.selectedLevelIndexValue = safe;
-    this.currentSeed = this.seedForLevel(level.id);
-    this.simulation = new GameSimulation(level, this.currentSeed);
+    this.endlessActive = level.id === ENDLESS_LEVEL_ID;
+    this.endlessWave = this.endlessActive ? 1 : 0;
+    const activeLevel = this.currentLevel;
+    this.currentSeed = this.seedForLevel(activeLevel.id);
+    this.simulation = new GameSimulation(activeLevel, this.currentSeed);
     this.audioEventCursor = 0;
     this.previewState = this.simulation.snapshot();
     this.screenValue = 'game';
@@ -763,11 +806,10 @@ export class GameRuntime {
         case 'scroll-route':
           if (this.screenValue === 'route') {
             const list = routeListRect(this.renderer.context.layout.viewport);
-            const visibleCount = this.unlockedLevelIds().length;
-            const cardHeight = this.renderer.context.layout.viewport.contentRect.width >= this.renderer.context.layout.viewport.contentRect.height ? 66 : 74;
-            const contentHeight = Math.max(0, visibleCount * (cardHeight + 10) - 10);
-            this.routeScrollOffset = Math.max(0, Math.min(Math.max(0, contentHeight - list.height), this.routeScrollOffset + command.delta));
-            this.render();
+            const lastCard = routeListCardRect(this.renderer.context.layout.viewport, Math.max(0, this.levels.length - 1), 0);
+            const contentWidth = Math.max(0, lastCard.x + lastCard.width - list.x);
+            const maxOffset = Math.max(0, contentWidth - list.width);
+            this.routeScrollOffset = Math.max(0, Math.min(maxOffset, this.routeScrollOffset + command.delta));
             flowChanged = true;
           }
           break;
@@ -836,12 +878,53 @@ export class GameRuntime {
     }
   }
 
+  private startEndlessWave(): void {
+    const level = this.currentLevel;
+    this.currentSeed = this.seedForLevel(level.id);
+    this.simulation = new GameSimulation(level, this.currentSeed);
+    this.audioEventCursor = 0;
+    this.previewState = this.simulation.snapshot();
+    this.screenValue = 'game';
+    this.routeMenuExpanded = false;
+    this.userPaused = false;
+    this.resultRecorded = false;
+    this.input.reset();
+    this.loop.reset();
+    this.syncLoopPause();
+    this.updateInputLayout();
+  }
+
   private recordResult(): void {
     if (!this.simulation || this.resultRecorded) return;
     const state = this.simulation.getState();
     if (state.phase !== 'result') return;
     this.resultRecorded = true;
     const level = this.currentLevel;
+    if (this.endlessActive && level.id === ENDLESS_LEVEL_ID) {
+      const completedWave = state.outcome === 'success' ? this.endlessWave : Math.max(0, this.endlessWave - 1);
+      let next = updateEndlessRecord(this.saveValue, completedWave, state.score?.total ?? 0);
+      if (state.outcome === 'success') {
+        this.saveValue = this.normalizeSave(next);
+        this.storage.save(this.saveValue);
+        // 轮次自动衔接前先消费本轮结算音效，避免替换 simulation 后丢失 success 事件。
+        this.processAudioEvents();
+        this.screenValue = 'result';
+        this.userPaused = false;
+        this.input.reset();
+        this.loop.setPaused(true);
+        this.updateInputLayout();
+        return;
+      }
+      this.saveValue = this.normalizeSave(next);
+      this.storage.save(this.saveValue);
+      this.endlessActive = false;
+      this.screenValue = 'result';
+      this.userPaused = false;
+      this.input.reset();
+      this.loop.setPaused(true);
+      this.updateInputLayout();
+      return;
+    }
     let next = updateBestScore(this.saveValue, level.id, state.score?.total ?? 0);
     next = updateBestStars(next, level.id, state.score?.stars ?? 0);
     next.stats.totalGuides += state.metrics.guideUses;
@@ -855,7 +938,8 @@ export class GameRuntime {
         if (!next.achievements.includes(medalAchievement)) next.achievements.push(medalAchievement);
       }
       const nextLevel = this.levels[this.selectedLevelIndexValue + 1];
-      if (nextLevel) next = unlockLevel(next, nextLevel.id);
+      if (nextLevel && nextLevel.id !== ENDLESS_LEVEL_ID) next = unlockLevel(next, nextLevel.id);
+      if (level.id === 'morning-light') next = unlockEndless(next);
     }
     this.saveValue = this.normalizeSave(next);
     this.storage.save(this.saveValue);
@@ -920,6 +1004,8 @@ export class GameRuntime {
       settings: this.saveValue.settings,
       routeMenuExpanded: this.routeMenuExpanded,
       routeScrollOffset: this.routeScrollOffset,
+      endlessBestWave: this.saveValue.endlessBestWave,
+      endlessBestScore: this.saveValue.endlessBestScore,
     };
     this.renderer.render(state, level, options);
     this.updateInputLayout();
@@ -979,8 +1065,10 @@ export class GameRuntime {
       base.pageBackRect = pageBackRect(layout.viewport);
       base.routeListRect = routeListRect(layout.viewport);
       const unlocked = new Set(this.unlockedLevelIds());
-      const visibleLevels = this.levels.filter((level) => unlocked.has(level.id));
-      base.levelHitAreas = visibleLevels.map((level, index) => ({
+      base.levelHitAreas = this.levels
+        .map((level, index) => ({ level, index }))
+        .filter(({ level }) => unlocked.has(level.id))
+        .map(({ level, index }) => ({
           id: level.id,
           rect: routeListCardRect(layout.viewport, index, this.routeScrollOffset),
         }));

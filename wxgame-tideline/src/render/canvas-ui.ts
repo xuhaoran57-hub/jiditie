@@ -462,7 +462,7 @@ export function renderPauseOverlay(renderContext: RenderContext): void {
   });
 }
 
-function renderLandscapeRoutePage(
+function renderRouteMapPage(
   renderContext: RenderContext,
   levels: readonly LevelConfig[],
   unlockedLevelIds: readonly string[],
@@ -471,51 +471,123 @@ function renderLandscapeRoutePage(
   bestStars: Readonly<Record<string, number>>,
   dropdownExpanded: boolean,
   scrollOffset: number,
+  endlessBestWave: number,
+  endlessBestScore: number,
 ): void {
+  void dropdownExpanded;
   const { ctx, layout } = renderContext;
   const content = layout.viewport.contentRect;
-  const visibleLevels = levels.map((level, index) => ({ level, index })).filter(({ level }) => unlockedLevelIds.includes(level.id));
+  const unlocked = new Set(unlockedLevelIds);
   renderContext.withScreen(() => {
-    ctx.fillStyle = '#0b1627';
+    ctx.fillStyle = '#091525';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
-    renderPageButton(renderContext, pageBackRect(layout.viewport), '首页');
-    drawCenteredText(ctx, '挤上这班车', { x: content.x + content.width / 2, y: content.y + 28 }, canvasFont(700, 24), UI.text);
-    drawCenteredText(ctx, '潮汐线·仅展示已解锁关卡', { x: content.x + content.width / 2, y: content.y + 54 }, canvasFont(400, 11), UI.muted);
+    drawHomeBackdrop(ctx, layout.viewport.width, layout.viewport.height);
+    renderPageButton(renderContext, pageBackRect(layout.viewport), '\u9996\u9875');
+    drawCenteredText(ctx, '\u6324\u4e0a\u8fd9\u73ed\u8f66', { x: content.x + content.width / 2, y: content.y + 34 }, canvasFont(700, 25), UI.text);
+    drawCenteredText(ctx, '\u6f6e\u6c50\u7ebf \u00b7 \u6a2a\u5411\u7ebf\u8def\u56fe', { x: content.x + content.width / 2, y: content.y + 60 }, canvasFont(400, 11), UI.muted);
     const list = routeListRect(layout.viewport);
-    drawCenteredText(ctx, '上下滑动选择已解锁关卡', { x: content.x + content.width / 2, y: content.y + 76 }, canvasFont(400, 10), UI.muted);
-    visibleLevels.forEach(({ level, index }, visibleIndex) => {
-      const card = routeListCardRect(layout.viewport, visibleIndex, scrollOffset);
-      if (card.y + card.height < list.y || card.y > list.y + list.height) return;
-      const selected = index === selectedIndex;
-      const padding = clamp(card.height * 0.15, 10, 16);
-      const titleSize = clamp(card.height * 0.17, 12, 16);
-      const bodySize = clamp(card.height * 0.115, 9, 12);
-      const radius = clamp(card.height * 0.16, 9, 15);
-      fillRoundRect(ctx, card.x, card.y, card.width, card.height, radius, UI.panel);
-      strokeRoundRect(ctx, card.x, card.y, card.width, card.height, radius, selected ? UI.accent : '#30415c', selected ? 2 : 1);
-      ctx.font = canvasFont(700, titleSize);
-      ctx.fillStyle = UI.text;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      fillTextCompat(ctx, (index + 1) + '. ' + level.name, card.x + padding, card.y + padding, Math.max(1, card.width - padding * 2));
-      ctx.font = canvasFont(400, bodySize);
-      ctx.fillStyle = UI.muted;
-      fillTextCompat(ctx, level.description, card.x + padding, card.y + card.height * 0.42, Math.max(1, card.width - padding * 2));
-      ctx.font = canvasFont(600, bodySize);
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = UI.accent;
-      ctx.fillText('可出发', card.x + card.width - padding, card.y + card.height - padding);
-      ctx.textAlign = 'left';
-      ctx.fillStyle = UI.gold;
-      ctx.fillText(starDisplay(bestStars[level.id] ?? 0), card.x + padding, card.y + card.height - padding);
-      if (bestScores[level.id] !== undefined) {
-        ctx.textAlign = 'center';
-        ctx.fillStyle = UI.muted;
-        ctx.fillText('最高 ' + String(bestScores[level.id]), card.x + card.width / 2, card.y + card.height - padding);
+    drawCenteredText(ctx, '\u5de6\u53f3\u6ed1\u52a8\u67e5\u770b\u7ebf\u8def\uff0c\u70b9\u51fb\u5df2\u89e3\u9501\u7ad9\u70b9\u51fa\u53d1', { x: content.x + content.width / 2, y: content.y + 84 }, canvasFont(400, 10), UI.muted);
+
+    // A framed transit board gives the route a clear visual stage and keeps the
+    // station line readable against the dark page background.
+    const panelY = list.y + 8;
+    const panelH = Math.max(1, list.height - 16);
+    fillRoundRect(ctx, list.x, panelY, list.width, panelH, 20, '#0b2030');
+    strokeRoundRect(ctx, list.x, panelY, list.width, panelH, 20, '#1f6178', 1);
+    fillRoundRect(ctx, list.x + 16, panelY + 12, 74, 20, 10, '#16394c');
+    drawCenteredText(ctx, '\u6f6e\u6c50\u7ebf', { x: list.x + 53, y: panelY + 22 }, canvasFont(700, 10), UI.accent);
+    const badgeWidth = 92;
+    fillRoundRect(ctx, list.x + list.width - badgeWidth - 16, panelY + 12, badgeWidth, 20, 10, '#103b4e');
+    strokeRoundRect(ctx, list.x + list.width - badgeWidth - 16, panelY + 12, badgeWidth, 20, 10, '#287893', 1);
+    drawCenteredText(ctx, '\u6a2a\u5411\u7ebf\u8def\u56fe', { x: list.x + list.width - badgeWidth / 2 - 16, y: panelY + 22 }, canvasFont(600, 9), UI.muted);
+
+    const firstCard = routeListCardRect(layout.viewport, 0, scrollOffset);
+    const baseCard = routeListCardRect(layout.viewport, 0, 0);
+    const step = baseCard.width + 10;
+    const lineY = list.y + list.height / 2;
+    const lineStart = firstCard.x + firstCard.width / 2;
+    const lineEnd = lineStart + Math.max(0, levels.length - 1) * step;
+    // Soft shadow, base rail, then a highlighted unlocked segment.
+    ctx.strokeStyle = '#081925';
+    ctx.lineWidth = 11;
+    ctx.beginPath();
+    ctx.moveTo(lineStart, lineY);
+    ctx.lineTo(lineEnd, lineY);
+    ctx.stroke();
+    ctx.strokeStyle = '#31505b';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(lineStart, lineY);
+    ctx.lineTo(lineEnd, lineY);
+    ctx.stroke();
+    const lastUnlockedIndex = levels.reduce((last, level, index) => unlocked.has(level.id) ? index : last, -1);
+    if (lastUnlockedIndex >= 0) {
+      const unlockedEnd = lineStart + lastUnlockedIndex * step;
+      ctx.strokeStyle = UI.accent;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(lineStart, lineY);
+      ctx.lineTo(unlockedEnd, lineY);
+      ctx.stroke();
+    }
+
+    levels.forEach((level, index) => {
+      const card = routeListCardRect(layout.viewport, index, scrollOffset);
+      const locked = !unlocked.has(level.id);
+      const selected = !locked && index === selectedIndex;
+      const centerX = card.x + card.width / 2;
+      const above = index % 2 === 0;
+      const labelY = lineY + (above ? -48 : 48);
+      if (selected) {
+        const boxY = above ? labelY - 24 : labelY - 9;
+        fillRoundRect(ctx, card.x + 5, boxY, card.width - 10, 32, 11, '#24566b');
+        strokeRoundRect(ctx, card.x + 5, boxY, card.width - 10, 32, 11, UI.accent, 2);
+      }
+      ctx.fillStyle = locked ? '#284955' : selected ? UI.accent : '#174c62';
+      ctx.strokeStyle = locked ? '#49616c' : selected ? UI.accent : '#5bc6aa';
+      ctx.lineWidth = selected ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(centerX, lineY, selected ? 12 : 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      if (selected) {
+        ctx.globalAlpha = 0.28;
+        ctx.strokeStyle = UI.accent;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(centerX, lineY, 17, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      ctx.font = canvasFont(700, 10);
+      ctx.fillStyle = locked ? UI.muted : UI.text;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(index + 1), centerX, lineY);
+      ctx.font = canvasFont(700, 13);
+      ctx.fillStyle = locked ? '#77909a' : UI.text;
+      ctx.textBaseline = above ? 'bottom' : 'top';
+      fillTextCompat(ctx, locked ? '???' : level.name, centerX, labelY, Math.max(1, card.width - 8));
+      if (!locked) {
+        ctx.font = canvasFont(600, 11);
+        ctx.fillStyle = UI.gold;
+        ctx.textBaseline = above ? 'top' : 'bottom';
+        ctx.fillText(starDisplay(bestStars[level.id] ?? 0), centerX, above ? labelY + 6 : labelY - 6);
+        if (level.id === 'endless' && endlessBestWave > 0) {
+          ctx.font = canvasFont(400, 9);
+          ctx.fillStyle = UI.muted;
+          ctx.fillText('\u6700\u9ad8 ' + String(endlessBestWave) + ' \u8f6e', centerX, above ? labelY + 21 : labelY - 21);
+          if (endlessBestScore > 0) {
+            ctx.font = canvasFont(400, 8);
+            ctx.fillText('\u6700\u9ad8\u5206 ' + String(endlessBestScore), centerX, above ? labelY + 33 : labelY - 33);
+          }
+        } else if (bestScores[level.id] !== undefined) {
+          ctx.font = canvasFont(400, 9);
+          ctx.fillStyle = UI.muted;
+          ctx.fillText('\u6700\u9ad8 ' + String(bestScores[level.id]), centerX, above ? labelY + 21 : labelY - 21);
+        }
       }
     });
-    if (visibleLevels.length === 0) drawCenteredText(ctx, '暂无可用关卡', { x: content.x + content.width / 2, y: content.y + content.height / 2 }, canvasFont(600, 15), UI.muted);
   });
 }
 
@@ -533,22 +605,119 @@ function renderPageButton(
   if (detail) drawCenteredText(ctx, detail, { x: rect.x + rect.width / 2, y: rect.y + rect.height * 0.74 }, canvasFont(400, 10), UI.muted);
 }
 
+function drawHomeBackdrop(ctx: Canvas2DContextLike, width: number, height: number): void {
+  ctx.save?.();
+  ctx.globalAlpha = 0.32;
+  ctx.strokeStyle = '#1c5270';
+  ctx.lineWidth = 1;
+  for (const orbit of [
+    { x: -58, y: height * 0.18, radius: 170 },
+    { x: width + 72, y: height * 0.78, radius: 210 },
+    { x: width * 0.72, y: -72, radius: 130 },
+  ]) {
+    ctx.beginPath();
+    ctx.arc(orbit.x, orbit.y, orbit.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.75;
+  ctx.fillStyle = '#63ead4';
+  for (const dot of [{ x: 54, y: height * 0.2, r: 3 }, { x: width - 48, y: height * 0.78, r: 3 }]) {
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore?.();
+}
+
+function drawMenuIcon(ctx: Canvas2DContextLike, kind: 'play' | 'trophy' | 'shirt' | 'settings', x: number, y: number, color: string): void {
+  ctx.save?.();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  if (kind === 'play') {
+    ctx.moveTo(x - 7, y - 10); ctx.lineTo(x + 9, y); ctx.lineTo(x - 7, y + 10); ctx.closePath(); ctx.fill();
+  } else if (kind === 'trophy') {
+    ctx.rect(x - 7, y - 9, 14, 12); ctx.stroke();
+    ctx.moveTo(x - 10, y - 7); ctx.lineTo(x - 7, y - 2); ctx.moveTo(x + 10, y - 7); ctx.lineTo(x + 7, y - 2);
+    ctx.moveTo(x, y + 3); ctx.lineTo(x, y + 9); ctx.moveTo(x - 6, y + 10); ctx.lineTo(x + 6, y + 10); ctx.stroke();
+  } else if (kind === 'shirt') {
+    ctx.moveTo(x - 6, y - 9); ctx.lineTo(x - 12, y - 4); ctx.lineTo(x - 8, y + 9); ctx.lineTo(x + 8, y + 9); ctx.lineTo(x + 12, y - 4); ctx.lineTo(x + 6, y - 9); ctx.lineTo(x + 3, y - 4); ctx.lineTo(x - 3, y - 4); ctx.closePath(); ctx.stroke();
+  } else {
+    ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke();
+    for (let index = 0; index < 8; index += 1) {
+      const angle = index * Math.PI / 4;
+      ctx.moveTo(x + Math.cos(angle) * 8, y + Math.sin(angle) * 8);
+      ctx.lineTo(x + Math.cos(angle) * 11, y + Math.sin(angle) * 11);
+    }
+    ctx.stroke();
+  }
+  ctx.restore?.();
+}
+
 export function renderHomePage(renderContext: RenderContext): void {
   const { ctx, layout } = renderContext;
   const content = layout.viewport.contentRect;
   renderContext.withScreen(() => {
-    ctx.fillStyle = '#0b1627';
+    ctx.fillStyle = '#091525';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
-    drawCenteredText(ctx, '挤上这班车', { x: content.x + content.width / 2, y: content.y + 38 }, canvasFont(800, 28), UI.text);
-    drawCenteredText(ctx, '湾城潮汐线 · 通勤挑战', { x: content.x + content.width / 2, y: content.y + 66 }, canvasFont(400, 13), UI.muted);
+    drawHomeBackdrop(ctx, layout.viewport.width, layout.viewport.height);
+    const frame = {
+      x: content.x + 8,
+      y: content.y + 8,
+      width: Math.max(1, content.width - 16),
+      height: Math.max(1, content.height - 16),
+    };
+    fillRoundRect(ctx, frame.x, frame.y, frame.width, frame.height, 24, '#0c1b2d');
+    strokeRoundRect(ctx, frame.x, frame.y, frame.width, frame.height, 24, '#1e5875', 1);
+    drawCenteredText(ctx, '\u6324\u4e0a\u8fd9\u73ed\u8f66', { x: content.x + content.width / 2, y: content.y + 42 }, canvasFont(800, 29), UI.text);
+    drawCenteredText(ctx, '\u6f6e\u6c50\u7ebf \u00b7 \u901a\u52e4\u6311\u6218', { x: content.x + content.width / 2, y: content.y + 70 }, canvasFont(400, 13), UI.muted);
     const buttons = [
-      ['开始游戏', '选择已解锁关卡'],
-      ['成就', '查看三星目标与称号'],
-      ['外观更换', '更换主角配色'],
-      ['设置', '声音与震动'],
+      ['\u5f00\u59cb\u6e38\u620f', '\u9009\u62e9\u5df2\u89e3\u9501\u5173\u5361', 'play'],
+      ['\u6210\u5c31', '\u67e5\u770b\u4e09\u661f\u76ee\u6807\u4e0e\u79f0\u53f7', 'trophy'],
+      ['\u5916\u89c2\u66f4\u6362', '\u66f4\u6362\u4e3b\u89d2\u914d\u8272', 'shirt'],
+      ['\u8bbe\u7f6e', '\u58f0\u97f3\u4e0e\u9707\u52a8', 'settings'],
     ] as const;
-    buttons.forEach(([label, detail], index) => renderPageButton(renderContext, menuButtonRect(layout.viewport, index, buttons.length), label, detail));
-    drawCenteredText(ctx, '所有线路均为虚构设定', { x: content.x + content.width / 2, y: content.y + content.height - 20 }, canvasFont(400, 10), UI.muted);
+    buttons.forEach(([label, detail, kind], index) => {
+      const rect = menuButtonRect(layout.viewport, index, buttons.length);
+      const selected = index === 0;
+      fillRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 14, selected ? '#123e53' : '#12304a');
+      strokeRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 14, selected ? UI.accent : '#235f84', selected ? 2 : 1);
+      const iconX = rect.x + 34;
+      ctx.globalAlpha = selected ? 1 : 0.88;
+      ctx.beginPath();
+      ctx.arc(iconX, rect.y + rect.height / 2, 15, 0, Math.PI * 2);
+      ctx.strokeStyle = selected ? UI.accent : '#4fa8de';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      drawMenuIcon(ctx, kind, iconX, rect.y + rect.height / 2, selected ? UI.accent : '#8fc9ee');
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = canvasFont(700, 15);
+      ctx.fillStyle = UI.text;
+      ctx.fillText(label, rect.x + 60, rect.y + rect.height * 0.38);
+      ctx.font = canvasFont(400, 10);
+      ctx.fillStyle = UI.muted;
+      ctx.fillText(detail, rect.x + 60, rect.y + rect.height * 0.7);
+      ctx.fillStyle = selected ? UI.accent : '#82b8d7';
+      ctx.font = canvasFont(700, 22);
+      ctx.textAlign = 'right';
+      ctx.fillText('\u203a', rect.x + rect.width - 18, rect.y + rect.height / 2);
+    });
+    ctx.globalAlpha = 0.65;
+    ctx.strokeStyle = '#35718c';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(content.x + content.width / 2 - 118, content.y + content.height - 28);
+    ctx.lineTo(content.x + content.width / 2 - 102, content.y + content.height - 28);
+    ctx.moveTo(content.x + content.width / 2 + 102, content.y + content.height - 28);
+    ctx.lineTo(content.x + content.width / 2 + 118, content.y + content.height - 28);
+    ctx.stroke();
+    drawCenteredText(ctx, '\u6240\u6709\u7ebf\u8def\u5747\u4e3a\u865a\u6784\u8bbe\u5b9a', { x: content.x + content.width / 2, y: content.y + content.height - 28 }, canvasFont(400, 10), UI.muted);
+    ctx.globalAlpha = 1;
   });
 }
 
@@ -665,62 +834,8 @@ export function renderRoutePage(
   bestStars: Readonly<Record<string, number>> = {},
   dropdownExpanded = true,
   scrollOffset = 0,
+  endlessBestWave = 0,
+  endlessBestScore = 0,
 ): void {
-  const { ctx, layout } = renderContext;
-  if (layout.orientation === 'landscape') {
-    renderLandscapeRoutePage(renderContext, levels, unlockedLevelIds, selectedIndex, bestScores, bestStars, dropdownExpanded, scrollOffset);
-    return;
-  }
-  renderContext.withScreen(() => {
-    const content = layout.viewport.contentRect;
-    const visibleLevels = levels.map((level, index) => ({ level, index })).filter(({ level }) => unlockedLevelIds.includes(level.id));
-    ctx.fillStyle = '#0b1627';
-    ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
-    renderPageButton(renderContext, pageBackRect(layout.viewport), '首页');
-    drawCenteredText(ctx, '挤上这班车', { x: content.x + content.width / 2, y: content.y + 52 }, canvasFont(700, 28), UI.text);
-    drawCenteredText(ctx, '已解锁关卡列表', { x: content.x + content.width / 2, y: content.y + 82 }, canvasFont(400, 13), UI.muted);
-    const list = routeListRect(layout.viewport);
-    drawCenteredText(ctx, '上下滑动选择已解锁关卡', { x: content.x + content.width / 2, y: content.y + 105 }, canvasFont(400, 12), UI.muted);
-    visibleLevels.forEach(({ level, index }, visibleIndex) => {
-      const card = routeListCardRect(layout.viewport, visibleIndex, scrollOffset);
-      if (card.y + card.height < list.y || card.y > list.y + list.height) return;
-      const y = card.y;
-      const selected = index === selectedIndex;
-      try {
-        ctx.fillStyle = UI.panel;
-        ctx.fillRect(card.x, y, card.width, card.height);
-      } catch {
-        // 基础矩形不可用时由圆角兼容路径继续绘制。
-      }
-      fillRoundRect(ctx, card.x, y, card.width, card.height, 18, UI.panel);
-      try {
-        ctx.strokeStyle = selected ? UI.accent : '#30415c';
-        ctx.lineWidth = selected ? 2 : 1;
-        ctx.strokeRect(card.x, y, card.width, card.height);
-      } catch {
-        // 由 strokeRoundRect 的兼容路径继续尝试边框绘制。
-      }
-      strokeRoundRect(ctx, card.x, y, card.width, card.height, 18, selected ? UI.accent : '#30415c', selected ? 2 : 1);
-      ctx.font = canvasFont(700, 17);
-      ctx.fillStyle = UI.text;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText((index + 1) + '. ' + level.name, card.x + 18, y + 17);
-      ctx.font = canvasFont(400, 12);
-      ctx.fillStyle = UI.muted;
-      fillTextCompat(ctx, level.description, card.x + 18, y + card.height * 0.4, card.width - 36);
-      ctx.textAlign = 'right';
-      ctx.fillStyle = UI.accent;
-      ctx.fillText('可出发', card.x + card.width - 18, y + card.height - 8);
-      ctx.textAlign = 'left';
-      ctx.fillStyle = UI.gold;
-      ctx.fillText(starDisplay(bestStars[level.id] ?? 0), card.x + 18, y + card.height - 8);
-      if (bestScores[level.id] !== undefined) {
-        ctx.textAlign = 'center';
-        ctx.fillStyle = UI.muted;
-        ctx.fillText('最高 ' + String(bestScores[level.id]), card.x + card.width / 2, y + card.height - 8);
-      }
-    });
-    if (visibleLevels.length === 0) drawCenteredText(ctx, '暂无可用关卡', { x: content.x + content.width / 2, y: content.y + content.height / 2 }, canvasFont(600, 15), UI.muted);
-  });
+  renderRouteMapPage(renderContext, levels, unlockedLevelIds, selectedIndex, bestScores, bestStars, dropdownExpanded, scrollOffset, endlessBestWave, endlessBestScore);
 }

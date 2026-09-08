@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   GameSimulation,
   CAMPAIGN_LEVELS,
+  createEndlessLevel,
   calculateScore,
   countObjectiveStars,
   isAppearanceUnlocked,
@@ -17,6 +18,8 @@ import {
   resolveCollisions,
   serializeSave,
   unlockLevel,
+  unlockEndless,
+  updateEndlessRecord,
   updateBestScore,
   updateBestStars,
   unlockedAppearanceIds,
@@ -514,7 +517,7 @@ test('损坏或未来版本存档安全回退，正常存档可往返', () => {
   assert.deepEqual(parseSave({ version: 999, unlockedLevelIds: ['star-ring'] }), fallback);
 
   const old = parseSave({ version: 0, unlockedLevels: ['cloud-harbor'], scores: { 'sea-gate': 87 } });
-  assert.equal(old.version, 2);
+  assert.equal(old.version, 3);
   assert.ok(old.unlockedLevelIds.includes('sea-gate'));
   assert.equal(old.bestScores['sea-gate'], 87);
   const roundTrip = parseSave(serializeSave(old));
@@ -522,6 +525,21 @@ test('损坏或未来版本存档安全回退，正常存档可往返', () => {
   const improved = updateBestScore(unlockLevel(old, 'star-ring'), 'sea-gate', 95);
   assert.ok(improved.unlockedLevelIds.includes('star-ring'));
   assert.equal(improved.bestScores['sea-gate'], 95);
+  const endless = updateEndlessRecord(unlockEndless(old), 4, 88);
+  assert.equal(endless.endlessUnlocked, true);
+  assert.equal(endless.endlessBestWave, 4);
+  assert.equal(endless.endlessBestScore, 88);
+});
+
+test('无尽模式按轮次递增客流并保留单轮倒计时', () => {
+  const first = createEndlessLevel(1);
+  const fifth = createEndlessLevel(5);
+  const thirteenth = createEndlessLevel(13);
+  assert.equal(first.id, 'endless');
+  assert.equal(fifth.id, 'endless');
+  assert.ok(fifth.passenger.count > first.passenger.count);
+  assert.ok(fifth.passenger.baseSpeed > first.passenger.baseSpeed);
+  assert.equal(thirteenth.boardingDuration, first.boardingDuration);
 });
 
 test('相同种子和相同输入得到相同的一局模拟结果', () => {

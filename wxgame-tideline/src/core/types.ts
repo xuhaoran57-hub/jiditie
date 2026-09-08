@@ -342,6 +342,9 @@ export interface SaveSettings {
 export interface SaveData {
   version: number;
   unlockedLevelIds: string[];
+  endlessUnlocked: boolean;
+  endlessBestWave: number;
+  endlessBestScore: number;
   bestScores: Record<string, number>;
   bestStars: Record<string, number>;
   achievements: string[];

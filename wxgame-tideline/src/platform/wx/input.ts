@@ -172,6 +172,9 @@ export class WxTouchInputAdapter {
   private pendingDoorId: string | undefined;
   private commands: TouchCommand[] = [];
   private routeTouchId: number | null = null;
+  private routeTouchStartX = 0;
+  private routeTouchLastX = 0;
+  private routeTouchMoved = false;
   private routeTouchStartY = 0;
   private routeTouchLastY = 0;
   private routeTouchLevelId: string | undefined;
@@ -242,6 +245,9 @@ export class WxTouchInputAdapter {
     this.pendingDoorId = undefined;
     this.commands = [];
     this.routeTouchId = null;
+    this.routeTouchStartX = 0;
+    this.routeTouchLastX = 0;
+    this.routeTouchMoved = false;
     this.routeTouchLevelId = undefined;
   }
 
@@ -308,6 +314,9 @@ export class WxTouchInputAdapter {
       if (this.layout.routeListRect && hitTestRect(this.layout.routeListRect, position)) {
         const level = this.layout.levelHitAreas?.find((area) => hitTestRect(area.rect, position));
         this.routeTouchId = point.identifier;
+        this.routeTouchStartX = position.x;
+        this.routeTouchLastX = position.x;
+        this.routeTouchMoved = false;
         this.routeTouchStartY = position.y;
         this.routeTouchLastY = position.y;
         this.routeTouchLevelId = level?.id;
@@ -347,7 +356,17 @@ export class WxTouchInputAdapter {
       : eventPoints(event).find((item) => item.identifier === this.routeTouchId);
     if (routePoint) {
       const position = touchPointPosition(routePoint);
-      if (position) this.routeTouchLastY = position.y;
+      if (position) {
+        const horizontalDelta = this.routeTouchLastX - position.x;
+        const verticalDelta = this.routeTouchLastY - position.y;
+        const delta = Math.abs(horizontalDelta) >= Math.abs(verticalDelta) ? horizontalDelta : verticalDelta;
+        if (Math.abs(delta) >= 1) {
+          this.commands.push({ type: 'scroll-route', delta });
+          this.routeTouchMoved = true;
+        }
+        this.routeTouchLastX = position.x;
+        this.routeTouchLastY = position.y;
+      }
     }
     if (this.joystickId === null) return;
     const point = eventPoints(event).find((item) => item.identifier === this.joystickId);
@@ -357,10 +376,16 @@ export class WxTouchInputAdapter {
 
   handleTouchEnd(event: WxTouchEventLike): void {
     if (this.routeTouchId !== null && containsIdentifier(event.changedTouches, this.routeTouchId)) {
-      const delta = this.routeTouchStartY - this.routeTouchLastY;
-      if (Math.abs(delta) >= 8) this.commands.push({ type: 'scroll-route', delta });
-      else if (this.routeTouchLevelId) this.commands.push({ type: 'select-level', levelId: this.routeTouchLevelId });
+      const horizontalDelta = this.routeTouchStartX - this.routeTouchLastX;
+      const verticalDelta = this.routeTouchStartY - this.routeTouchLastY;
+      const delta = Math.abs(horizontalDelta) >= Math.abs(verticalDelta) ? horizontalDelta : verticalDelta;
+      if (!this.routeTouchMoved && Math.abs(delta) < 8 && this.routeTouchLevelId) {
+        this.commands.push({ type: 'select-level', levelId: this.routeTouchLevelId });
+      }
       this.routeTouchId = null;
+      this.routeTouchStartX = 0;
+      this.routeTouchLastX = 0;
+      this.routeTouchMoved = false;
       this.routeTouchLevelId = undefined;
     }
     this.releaseIfMissing(event);
@@ -369,6 +394,9 @@ export class WxTouchInputAdapter {
   handleTouchCancel(event: WxTouchEventLike): void {
     if (this.routeTouchId !== null && containsIdentifier(event.changedTouches, this.routeTouchId)) {
       this.routeTouchId = null;
+      this.routeTouchStartX = 0;
+      this.routeTouchLastX = 0;
+      this.routeTouchMoved = false;
       this.routeTouchLevelId = undefined;
     }
     this.releaseIfMissing(event);

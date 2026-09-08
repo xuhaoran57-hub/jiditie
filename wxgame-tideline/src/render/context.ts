@@ -412,9 +412,17 @@ export function routeListRect(viewport: ViewportMetrics): Rect {
 
 export function routeListCardRect(viewport: ViewportMetrics, index: number, scrollOffset = 0): Rect {
   const list = routeListRect(viewport);
+  const landscape = viewport.contentRect.width >= viewport.contentRect.height;
   const gap = 10;
-  const height = viewport.contentRect.width >= viewport.contentRect.height ? 66 : 74;
-  return { x: list.x, y: list.y + Math.max(0, Math.floor(index)) * (height + gap) - Math.max(0, scrollOffset), width: list.width, height };
+  const width = landscape ? 132 : 112;
+  const height = Math.max(1, Math.min(landscape ? 178 : 170, list.height - 16));
+  const safeIndex = Math.max(0, Math.floor(index));
+  return {
+    x: list.x + 12 + safeIndex * (width + gap) - Math.max(0, scrollOffset),
+    y: list.y + (list.height - height) / 2,
+    width,
+    height,
+  };
 }
 
 /** 外观页独立布局：卡片预览和触摸命中共用，窄横屏也使用两列。 */

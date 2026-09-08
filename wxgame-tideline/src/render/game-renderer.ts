@@ -41,6 +41,8 @@ export interface RenderOptions {
   settings?: SaveSettings;
   routeMenuExpanded?: boolean;
   routeScrollOffset?: number;
+  endlessBestWave?: number;
+  endlessBestScore?: number;
 }
 
 export interface RenderAssetOptions {
@@ -177,6 +179,8 @@ export class GameRenderer {
         options.bestStars ?? {},
         options.routeMenuExpanded ?? true,
         options.routeScrollOffset ?? 0,
+        options.endlessBestWave ?? 0,
+        options.endlessBestScore ?? 0,
       );
       return;
     }

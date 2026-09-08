@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { GameRuntime } from '../src/runtime/index.ts';
 import { WxAudioAdapter } from '../src/platform/wx/index.ts';
-import { appearanceCardRect, menuButtonRect, routeListCardRect } from '../src/render/index.ts';
+import { appearanceCardRect, menuButtonRect, routeListCardRect, routeListRect } from '../src/render/index.ts';
 import { emptySave, serializeSave } from '../src/core/save-schema.ts';
 
 class MockContext {
@@ -320,4 +320,43 @@ test('M6 缺少微信音频 API 时保持静默并继续推进', () => {
   });
   assert.equal(runtime.audio.unlocked, true);
   assert.equal(runtime.state?.activeEvent?.kind, 'rain');
+});
+
+test('无尽模式通关一轮后自动进入下一轮并保存最高轮数', () => {
+  const wx = createMockWx();
+  const save = emptySave();
+  save.endlessUnlocked = true;
+  save.unlockedLevelIds.push('endless');
+  wx.setStorageSync('tideline.save.v1', serializeSave(save));
+  const runtime = new GameRuntime(wx, { seed: 31 });
+  assert.equal(runtime.selectLevel('endless'), true);
+  assert.match(runtime.currentLevel.stationName, /1/);
+  assert.equal(runtime.confirmStart(), true);
+  runtime.state.player.position = {
+    x: runtime.currentLevel.trainBounds.x + runtime.currentLevel.trainBounds.width / 2,
+    y: runtime.currentLevel.trainBounds.y + runtime.currentLevel.trainBounds.height / 2,
+  };
+  for (let index = 0; index < 120 && runtime.endlessWave === 1; index += 1) runtime.tick(0.25);
+  assert.equal(runtime.screen, 'result');
+  assert.equal(runtime.nextLevel(), true);
+  assert.equal(runtime.screen, 'game');
+  assert.equal(runtime.endlessWave, 2);
+  assert.ok(runtime.saveData.endlessBestWave >= 1);
+});
+
+test('路线页横向拖动会增量滚动且松手不误触站点', () => {
+  const wx = createMockWx();
+  const runtime = new GameRuntime(wx, { seed: 5 });
+  runtime.start();
+  runtime.openRoute();
+  const list = routeListRect(runtime.renderer.context.layout.viewport);
+  const startX = list.x + list.width * 0.6;
+  const y = list.y + list.height / 2;
+  wx._listeners.touchStart({ changedTouches: [{ identifier: 9, x: startX, y }] });
+  wx._listeners.touchMove({ touches: [{ identifier: 9, x: startX - 32, y }] });
+  runtime.tick(0);
+  assert.ok(runtime.snapshot().routeScrollOffset > 0);
+  wx._listeners.touchEnd({ changedTouches: [{ identifier: 9, x: startX - 32, y }] });
+  runtime.tick(0);
+  assert.equal(runtime.screen, 'route');
 });

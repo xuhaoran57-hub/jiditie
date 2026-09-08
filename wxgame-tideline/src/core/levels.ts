@@ -322,14 +322,14 @@ const tidewatch: LevelConfig = {
   warningThreshold: 1.7,
   platformBounds: platform(),
   trainBounds: train(),
-  doors: [door('a', 'A 门', 92, 46), door('b', 'B 门', 228, 46, true)],
+  doors: [door('a', 'A 门', 92, 42), door('b', 'B 门', 228, 42, true)],
   passenger: {
     count: 104,
-    alightingCount: 30,
-    baseSpeed: 46,
-    spawnPadding: 19,
-    exitMargin: 38,
-    kindWeights: { regular: 6, slow: 2, fast: 4, luggage: 2, phone: 2, group: 3 },
+    alightingCount: 34,
+    baseSpeed: 48,
+    spawnPadding: 18,
+    exitMargin: 39,
+    kindWeights: { regular: 5, slow: 2, fast: 5, luggage: 3, phone: 3, group: 4 },
   },
   player: { spawn: { x: 160, y: 520 }, radius: 12, speed: 132, maxStamina: 100, staminaRegen: 4.4 },
   carriageCapacity: 46,
@@ -338,11 +338,15 @@ const tidewatch: LevelConfig = {
   events: [
     {
       id: 'tidewatch-rain', kind: 'rain', at: 3.1, duration: 2.6,
-      label: '窄站台雨幕', description: '两侧空间收窄，中央路线更容易保持通畅。', horizontalInset: 50,
+      label: '窄站台雨幕', description: '两侧空间收窄，中央路线更容易保持通畅。', horizontalInset: 54,
     },
     {
-      id: 'tidewatch-door-close', kind: 'door-close', at: 3, duration: 1.4, warningDuration: 2.4,
+      id: 'tidewatch-door-close', kind: 'door-close', at: 5.8, duration: 1.4, warningDuration: 2.4,
       label: 'B 门临时关闭', description: '雨幕中 B 门提前关闭，及时改从 A 门进入。', fromDoorId: 'b', toDoorId: 'a',
+    },
+    {
+      id: 'tidewatch-surge', kind: 'crowd-surge', at: 9.8, duration: 1.4,
+      label: '雨后回流', description: '雨幕后客流回涌，最后一段要把人流推向仍开放的门。', speedMultiplier: 1.3,
     },
   ],
 };
@@ -358,14 +362,14 @@ const weavingCloud: LevelConfig = {
   warningThreshold: 1.6,
   platformBounds: platform(),
   trainBounds: train(),
-  doors: [door('a', 'A 门', 92, 46), door('b', 'B 门', 228, 46, true)],
+  doors: [door('a', 'A 门', 92, 42), door('b', 'B 门', 228, 42, true)],
   passenger: {
     count: 104,
-    alightingCount: 32,
-    baseSpeed: 46,
-    spawnPadding: 19,
-    exitMargin: 38,
-    kindWeights: { regular: 5, slow: 2, fast: 4, luggage: 2, phone: 3, group: 3 },
+    alightingCount: 36,
+    baseSpeed: 48,
+    spawnPadding: 18,
+    exitMargin: 39,
+    kindWeights: { regular: 4, slow: 1, fast: 5, luggage: 3, phone: 4, group: 4 },
   },
   player: { spawn: { x: 160, y: 520 }, radius: 12, speed: 134, maxStamina: 100, staminaRegen: 4.2 },
   carriageCapacity: 50,
@@ -373,7 +377,8 @@ const weavingCloud: LevelConfig = {
   guide: { ...baseGuide, cost: 20, cooldown: 1, range: 88, maxTargets: 2 },
   events: [
     { id: 'weaving-cloud-close', kind: 'door-close', at: 2.8, duration: 1.8, warningDuration: 3, label: 'B 门提前关闭', description: 'B 门提前关闭，A 门保持开放。', fromDoorId: 'b', toDoorId: 'a' },
-    { id: 'weaving-cloud-cart', kind: 'luggage-cart', at: 6.1, duration: 1.1, label: '行李车横穿', description: '行李车从左侧驶向右侧，利用门侧空隙绕行。', zone: { x: 0, y: 170, width: 68, height: 116 } },
+    { id: 'weaving-cloud-surge', kind: 'crowd-surge', at: 7.8, duration: 1.2, label: '交错回流', description: '换门后的两股人流短暂交错，先稳住站位再穿过空隙。', speedMultiplier: 1.3 },
+    { id: 'weaving-cloud-cart', kind: 'luggage-cart', at: 9.2, duration: 1.1, label: '行李车横穿', description: '行李车从左侧驶向右侧，利用门侧空隙绕行。', zone: { x: 0, y: 170, width: 78, height: 120 } },
   ],
 };
 
@@ -388,22 +393,23 @@ const farSail: LevelConfig = {
   warningThreshold: 1.5,
   platformBounds: platform(),
   trainBounds: train(),
-  doors: [door('a', 'A 门', 92, 48), door('b', 'B 门', 228, 48, true)],
+  doors: [door('a', 'A 门', 92, 44), door('b', 'B 门', 228, 44, true)],
   passenger: {
     count: 108,
-    alightingCount: 36,
-    baseSpeed: 45,
-    spawnPadding: 18,
-    exitMargin: 39,
-    kindWeights: { regular: 5, slow: 2, fast: 5, luggage: 3, phone: 3, group: 4 },
+    alightingCount: 40,
+    baseSpeed: 48,
+    spawnPadding: 17,
+    exitMargin: 40,
+    kindWeights: { regular: 4, slow: 1, fast: 6, luggage: 4, phone: 4, group: 5 },
   },
   player: { spawn: { x: 160, y: 522 }, radius: 12, speed: 138, maxStamina: 100, staminaRegen: 4 },
   carriageCapacity: 58,
   recommendedDoorId: 'b',
   guide: { ...baseGuide, cost: 21, cooldown: 1, range: 86, maxTargets: 2 },
   events: [
-    { id: 'far-sail-surge', kind: 'crowd-surge', at: 2.6, duration: 1.8, label: '展馆散场', description: '快步人流从中央穿过，站位要更果断。', speedMultiplier: 1.32 },
-    { id: 'far-sail-cart', kind: 'luggage-cart', at: 5.2, duration: 1.1, label: '行李车横穿', description: '行李车从左侧驶向右侧，及时转向侧门。', zone: { x: 0, y: 170, width: 76, height: 116 } },
+    { id: 'far-sail-surge', kind: 'crowd-surge', at: 2.6, duration: 1.8, label: '展馆散场', description: '快步人流从中央穿过，站位要更果断。', speedMultiplier: 1.42 },
+    { id: 'far-sail-close', kind: 'door-close', at: 4.6, duration: 1.2, warningDuration: 1.8, label: 'B 门短暂关闭', description: '散场人流后 B 门短暂关闭，及时转向 A 门。', fromDoorId: 'b', toDoorId: 'a' },
+    { id: 'far-sail-cart', kind: 'luggage-cart', at: 7.8, duration: 1.1, label: '行李车横穿', description: '行李车从左侧驶向右侧，及时转向侧门。', zone: { x: 0, y: 170, width: 88, height: 120 } },
   ],
 };
 
@@ -418,23 +424,23 @@ const morningLight: LevelConfig = {
   warningThreshold: 1.4,
   platformBounds: platform(),
   trainBounds: train(),
-  doors: [door('a', 'A 门', 92, 48), door('b', 'B 门', 228, 48, true)],
+  doors: [door('a', 'A 门', 92, 44), door('b', 'B 门', 228, 44, true)],
   passenger: {
     count: 108,
-    alightingCount: 38,
-    baseSpeed: 45,
-    spawnPadding: 18,
+    alightingCount: 44,
+    baseSpeed: 48,
+    spawnPadding: 17,
     exitMargin: 40,
-    kindWeights: { regular: 4, slow: 2, fast: 6, luggage: 3, phone: 3, group: 5 },
+    kindWeights: { regular: 3, slow: 1, fast: 7, luggage: 4, phone: 4, group: 6 },
   },
   player: { spawn: { x: 160, y: 524 }, radius: 12, speed: 138, maxStamina: 100, staminaRegen: 3.8 },
   carriageCapacity: 60,
   recommendedDoorId: 'b',
   guide: { ...baseGuide, cost: 22, cooldown: 1, range: 84, maxTargets: 2 },
   events: [
-    { id: 'morning-light-surge', kind: 'crowd-surge', at: 2.3, duration: 1.5, label: '终点快步潮', description: '快步客集中出现，提前占位比临时冲刺更有效。', speedMultiplier: 1.28 },
-    { id: 'morning-light-close', kind: 'door-close', at: 2.8, duration: 1.3, warningDuration: 2.2, label: 'B 门提前关闭', description: 'B 门提前关闭，最后窗口从 A 门进入。', fromDoorId: 'b', toDoorId: 'a' },
-    { id: 'morning-light-cart', kind: 'luggage-cart', at: 5.4, duration: 1.1, label: '行李车横穿', description: '行李车从左侧驶向右侧，最后窗口需要缓慢绕行。', zone: { x: 0, y: 168, width: 78, height: 118 } },
+    { id: 'morning-light-surge', kind: 'crowd-surge', at: 2.3, duration: 1.5, label: '终点快步潮', description: '快步客集中出现，提前占位比临时冲刺更有效。', speedMultiplier: 1.36 },
+    { id: 'morning-light-close', kind: 'door-close', at: 4, duration: 1.5, warningDuration: 2.2, label: 'B 门提前关闭', description: 'B 门提前关闭，最后窗口从 A 门进入。', fromDoorId: 'b', toDoorId: 'a' },
+    { id: 'morning-light-cart', kind: 'luggage-cart', at: 7.8, duration: 1.1, label: '行李车横穿', description: '行李车从左侧驶向右侧，最后窗口需要缓慢绕行。', zone: { x: 0, y: 168, width: 84, height: 122 } },
   ],
 };
 
@@ -485,11 +491,64 @@ const CAMPAIGN_LEVEL_BASE: readonly LevelConfig[] = [
   morningLight,
 ];
 
+export const ENDLESS_LEVEL_ID = 'endless';
+
+/** 无尽模式的线路节点配置；实际每轮参数由 createEndlessLevel 生成。 */
+export const ENDLESS_LEVEL: LevelConfig = attachObjectives({
+  ...morningLight,
+  id: ENDLESS_LEVEL_ID,
+  name: '无尽早高峰',
+  stationName: '无尽早高峰',
+  description: '完成一轮后继续下一站，客流与事件压力会逐轮增加。',
+});
+
 /** 保留三关 MVP 别名，旧测试和外部调试工具继续使用。 */
 export const MVP_LEVELS: readonly LevelConfig[] = [seaGate, cloudHarbor, starRing].map(attachObjectives);
 
 /** 正式 12 站战役；运行时默认使用该列表。 */
 export const CAMPAIGN_LEVELS: readonly LevelConfig[] = CAMPAIGN_LEVEL_BASE.map(attachObjectives);
+
+export function createEndlessLevel(wave = 1): LevelConfig {
+  const safeWave = Math.max(1, Math.floor(Number.isFinite(wave) ? wave : 1));
+  const source = CAMPAIGN_LEVELS[(safeWave - 1) % CAMPAIGN_LEVELS.length] ?? CAMPAIGN_LEVELS[0];
+  const pressure = 1 + Math.min(1.4, (safeWave - 1) * 0.075);
+  const speedPressure = 1 + Math.min(0.55, (safeWave - 1) * 0.027);
+  const events = (source.events ?? []).map((event) => ({
+    ...event,
+    id: `endless-${safeWave}-${event.id}`,
+    speedMultiplier: event.speedMultiplier === undefined
+      ? undefined
+      : Math.min(1.9, event.speedMultiplier * speedPressure),
+  }));
+  return attachObjectives({
+    ...source,
+    id: ENDLESS_LEVEL_ID,
+    name: '无尽早高峰',
+    stationName: `无尽早高峰 · 第 ${safeWave} 轮`,
+    description: `第 ${safeWave} 轮：客流压力持续上升，坚持到下一站。`,
+    passenger: {
+      ...source.passenger,
+      count: Math.min(260, Math.round(source.passenger.count * pressure)),
+      alightingCount: Math.min(
+        Math.round(source.passenger.count * pressure),
+        Math.round(source.passenger.alightingCount * pressure),
+      ),
+      baseSpeed: source.passenger.baseSpeed * speedPressure,
+      kindWeights: {
+        ...source.passenger.kindWeights,
+        fast: (source.passenger.kindWeights.fast ?? 0) + Math.min(8, (safeWave - 1) * 0.25),
+        group: (source.passenger.kindWeights.group ?? 0) + Math.min(6, (safeWave - 1) * 0.18),
+      },
+    },
+    // 保持每轮的倒计时长度，通过客流和事件压力递增提升难度。
+    events,
+    objectives: [
+      { id: 'alighting-rate', label: '保证 70% 下车乘客顺利离开', minRatio: 0.7 },
+      { id: 'finish-time', label: '提前 1 秒进入车厢', minRemaining: 1 },
+      { id: 'courtesy-score', label: '礼让值达到 60', minScore: 60 },
+    ],
+  });
+}
 
 export const LEVELS_BY_ID: Readonly<Record<string, LevelConfig>> = Object.fromEntries(
   CAMPAIGN_LEVELS.map((level) => [level.id, level]),

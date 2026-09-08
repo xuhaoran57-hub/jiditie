@@ -298,7 +298,26 @@ test('roundRect falls back when a partially exposed native method throws', () =>
   const renderer = GameRenderer.fromCanvas(canvas, 375, 667, 1, {}, MVP_LEVELS[0]);
   const state = new GameSimulation(MVP_LEVELS[0], 7).snapshot();
   renderer.render(state, MVP_LEVELS[0], { screen: 'route', levels: MVP_LEVELS });
-  assert.ok(context.operations.some(([name, text]) => name === 'fillText' && text === '1. 海风门'));
+  assert.ok(context.operations.some(([name, text]) => name === 'fillText' && text === MVP_LEVELS[0].name));
+});
+
+
+test('route page renders a horizontal map with locked station placeholders', () => {
+  const context = new MockContext();
+  const canvas = makeCanvas(context);
+  const renderer = GameRenderer.fromCanvas(canvas, 667, 375, 1, {}, MVP_LEVELS[0]);
+  const state = new GameSimulation(MVP_LEVELS[0], 7).snapshot();
+  renderer.render(state, MVP_LEVELS[0], {
+    screen: 'route',
+    levels: MVP_LEVELS,
+    unlockedLevelIds: ['sea-gate'],
+    selectedLevelIndex: 0,
+  });
+  const texts = context.operations.filter(([name]) => name === 'fillText').map(([, text]) => text);
+  assert.ok(texts.includes(MVP_LEVELS[0].name));
+  assert.ok(texts.filter((text) => text === '???').length >= 2);
+  assert.equal(texts.includes(MVP_LEVELS[1].description), false);
+  assert.ok(context.operations.some(([name]) => name === 'lineTo'));
 });
 
 test('GameRenderer renders game, warning, pause, result and route screens on a mock canvas', () => {
