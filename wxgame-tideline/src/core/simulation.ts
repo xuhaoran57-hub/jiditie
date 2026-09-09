@@ -506,8 +506,17 @@ export class GameSimulation {
     this.state.events.push({ type: 'event-start', at: this.state.elapsed, detail: `${event.kind}:${event.id}` });
 
     if (event.kind === 'door-close') {
-      const fromDoorId = event.fromDoorId ?? this.state.recommendedDoorId;
-      const toDoorId = event.toDoorId ?? this.level.doors.find((door) => door.id !== fromDoorId)?.id;
+      // 双门关卡的临时关门方向由本局种子决定，避免每次固定关闭右侧门。
+      // 仍保留配置字段作为单门/特殊关卡的显式覆盖，并保证目标门是另一扇门。
+      const configuredFromDoorId = event.fromDoorId;
+      const configuredToDoorId = event.toDoorId;
+      const shouldRandomize = this.level.doors.length === 2;
+      const fromDoorId = shouldRandomize
+        ? this.random.pick(this.level.doors).id
+        : (configuredFromDoorId ?? this.state.recommendedDoorId);
+      const toDoorId = shouldRandomize
+        ? this.level.doors.find((door) => door.id !== fromDoorId)?.id
+        : (configuredToDoorId ?? this.level.doors.find((door) => door.id !== fromDoorId)?.id);
       const fromDoor = findDoor(this.level, fromDoorId);
       const toDoor = toDoorId ? findDoor(this.level, toDoorId) : undefined;
       if (fromDoor && toDoor && fromDoor.id !== toDoor.id) {

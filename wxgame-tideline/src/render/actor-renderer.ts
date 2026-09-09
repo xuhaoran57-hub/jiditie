@@ -970,6 +970,12 @@ function drawPassenger(
 function drawPlayerBody(context: RenderContext, appearanceId: string, stride = 0, guideLift = 0): void {
   const { ctx } = context;
   const palette = playerAppearancePalette(appearanceId);
+  if (appearanceId.startsWith('endless')) {
+    ctx.fillStyle = appearanceId === 'endless20' ? '#d8e7ff' : appearanceId === 'endless15' ? '#f3c85b' : '#b9d5e8';
+    ctx.beginPath();
+    ctx.moveTo(-7, -4); ctx.lineTo(0, -11); ctx.lineTo(7, -4); ctx.lineTo(5, 1); ctx.lineTo(-5, 1); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = palette.highlight; ctx.lineWidth = 1.5; ctx.stroke();
+  }
   // 玩家专属背包、靴子和当前外观配色的外套。
   fillRoundRect(ctx, -8, -1, 5, 12, 2, '#28445a');
   ctx.strokeStyle = palette.shirt;
@@ -1028,6 +1034,9 @@ function drawPlayerBody(context: RenderContext, appearanceId: string, stride = 0
   fillRoundRect(ctx, 2.7, 0.5, 4.3, 5.2, 1, '#f5cb66');
   ctx.fillStyle = '#fff4c6';
   ctx.fillRect(3.5, 1.3, 2.7, 1.2);
+  if (appearanceId === 'endless10' || appearanceId === 'endless20') {
+    ctx.strokeStyle = palette.highlight; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(0, -7.5, 6.8, Math.PI, Math.PI * 2); ctx.stroke();
+  }
 }
 
 /** 屏幕坐标预览复用游戏内 Sprite 和几何回退，不应用世界缩放。 */

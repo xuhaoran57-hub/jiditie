@@ -18,6 +18,7 @@ import {
   strokeRoundRect,
 } from './context.ts';
 import { canvasFont, canvasMonoFont, TIDELINE_TOKENS } from './design-tokens.ts';
+import { objectiveCompleted } from '../core/score.ts';
 
 const UI = {
   panel: TIDELINE_TOKENS.color.panel,
@@ -58,6 +59,19 @@ function objectiveSummary(level: LevelConfig): string {
 function starDisplay(value: number): string {
   const stars = Math.min(3, Math.max(0, Math.floor(Number.isFinite(value) ? value : 0)));
   return '★'.repeat(stars) + '☆'.repeat(3 - stars);
+}
+
+function drawObjectiveResults(ctx: Canvas2DContextLike, level: LevelConfig, state: GameState, x: number, y: number, width: number): number {
+  const objectives = (level.objectives ?? []).slice(0, 3);
+  objectives.forEach((objective, index) => {
+    const completed = objectiveCompleted(state, objective);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = canvasFont(500, 10);
+    ctx.fillStyle = completed ? UI.accent : UI.muted;
+    fillTextCompat(ctx, `${completed ? '✓' : '○'} ${objective.label}`, x, y + index * 16, width);
+  });
+  return objectives.length * 16;
 }
 
 function drawBar(
@@ -321,6 +335,7 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
       y: rect.y + 56,
     }, canvasFont(400, 12), UI.muted);
     if (score) {
+      if (level.id !== 'endless') drawObjectiveResults(ctx, level, state, rect.x + 24, rect.y + 112, rect.width - 48);
       drawCenteredText(ctx, score.medal === 'none' ? '\u7ee7\u7eed\u89c2\u5bdf' : score.medal.toUpperCase() + ' MEDAL', {
         x: rect.x + rect.width / 2,
         y: rect.y + 82,
@@ -401,7 +416,8 @@ export function renderResultScreen(renderContext: RenderContext, level: LevelCon
 
     if (score) {
       drawCenteredText(ctx, score.medal === 'none' ? '继续观察，再试一局' : `${score.medal.toUpperCase()} 牌`, { x: rect.x + rect.width / 2, y: rect.y + 108 }, canvasFont(700, 18), medalColor(score.medal));
-      drawCenteredText(ctx, `三星目标 ${score.stars} / 3`, { x: rect.x + rect.width / 2, y: rect.y + 132 }, canvasFont(600, 12), UI.gold);
+      drawCenteredText(ctx, level.id === 'endless' ? '本轮坚持记录' : `三星目标 ${score.stars} / 3`, { x: rect.x + rect.width / 2, y: rect.y + 132 }, canvasFont(600, 12), UI.gold);
+      if (level.id !== 'endless') drawObjectiveResults(ctx, level, state, rect.x + 22, rect.y + 152, rect.width - 44);
       const rows: Array<[string, number]> = [
         ['效率', score.efficiency],
         ['礼让', score.courtesy],
@@ -734,7 +750,7 @@ export function renderLevelBriefing(renderContext: RenderContext, level: LevelCo
     ctx.globalAlpha = 1;
     drawCenteredText(ctx, '出发前提醒', { x: content.x + content.width / 2, y: panel.y + 42 }, canvasFont(800, 23), UI.text);
     drawCenteredText(ctx, level.stationName, { x: content.x + content.width / 2, y: panel.y + 70 }, canvasFont(500, 13), UI.muted);
-    drawCenteredText(ctx, '本关三星目标', { x: panel.x + panel.width / 2, y: panel.y + 112 }, canvasFont(700, 14), UI.gold);
+    if (level.id !== 'endless') drawCenteredText(ctx, '本关三星目标', { x: panel.x + panel.width / 2, y: panel.y + 112 }, canvasFont(700, 14), UI.gold);
     (level.objectives ?? []).slice(0, 3).forEach((objective, index) => {
       const label = objectiveSummary({ ...level, objectives: [objective] });
       ctx.textAlign = 'left';

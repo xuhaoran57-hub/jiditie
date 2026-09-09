@@ -582,19 +582,33 @@ test('M5 提前关门会阻塞旧门并保持到本局结束', () => {
   assert.equal(state.activeEvent?.kind, 'door-close');
   assert.equal(state.recommendedDoorId, simulation.level.recommendedDoorId);
   assert.equal(state.player.selectedDoorId, simulation.level.recommendedDoorId);
-  assert.equal(state.doors.find((door) => door.id === 'b')?.blocked, false, '3 秒预警期间旧门仍开放');
-  assert.equal(state.doors.find((door) => door.id === 'a')?.blocked, false);
+  assert.ok(state.doors.every((door) => !door.blocked), '预警期间两扇门都仍开放');
   assert.equal(state.events.some((event) => event.type === 'event-door-close'), false);
 
   simulation.step(2.4);
-  assert.equal(state.doors.find((door) => door.id === 'b')?.blocked, true);
-  assert.ok(state.events.some((event) => event.type === 'event-door-close' && event.detail === 'b->a'));
+  const closeEvent = state.events.find((event) => event.type === 'event-door-close');
+  assert.ok(closeEvent);
+  const [closedDoorId, rerouteDoorId] = closeEvent.detail.split('->');
+  assert.equal(state.doors.find((door) => door.id === closedDoorId)?.blocked, true);
+  assert.equal(state.doors.find((door) => door.id === rerouteDoorId)?.blocked, false);
 
   simulation.step(3);
   assert.equal(state.activeEvent, null);
   assert.equal(state.recommendedDoorId, simulation.level.recommendedDoorId);
-  assert.equal(state.doors.find((door) => door.id === 'b')?.blocked, true);
-  assert.equal(state.doors.find((door) => door.id === 'a')?.blocked, false);
+  assert.equal(state.doors.find((door) => door.id === closedDoorId)?.blocked, true);
+  assert.equal(state.doors.find((door) => door.id === rerouteDoorId)?.blocked, false);
+});
+
+test('双门提前关门会按种子随机选择关闭方向', () => {
+  const closed = new Set();
+  for (let seed = 1; seed <= 24; seed += 1) {
+    const simulation = new GameSimulation('qixia-garden', seed);
+    simulation.step(4.25);
+    const fromDoorId = simulation.getState().activeEvent?.fromDoorId;
+    assert.ok(fromDoorId);
+    closed.add(fromDoorId);
+  }
+  assert.deepEqual([...closed].sort(), ['a', 'b']);
 });
 
 test('M5 提前关门期间已经排到旧门的 NPC 也不能继续进车', () => {
@@ -603,7 +617,8 @@ test('M5 提前关门期间已经排到旧门的 NPC 也不能继续进车', () 
   const state = simulation.getState();
   const passenger = state.passengers.find((item) => item.role === 'waiting');
   assert.ok(passenger);
-  const oldDoor = simulation.level.doors.find((door) => door.id === 'b');
+  const oldDoorId = state.activeEvent?.fromDoorId;
+  const oldDoor = simulation.level.doors.find((door) => door.id === oldDoorId);
   assert.ok(oldDoor);
   passenger.role = 'boarding';
   passenger.doorId = oldDoor.id;
@@ -613,10 +628,11 @@ test('M5 提前关门期间已经排到旧门的 NPC 也不能继续进车', () 
   state.doors.find((door) => door.id === oldDoor.id).occupancy += 1;
 
   simulation.step(2.4 + 1 / 30);
+  const rerouteDoorId = state.activeEvent?.toDoorId ?? simulation.level.doors.find((door) => door.id !== oldDoor.id)?.id;
   assert.equal(passenger.role, 'waiting');
   assert.equal(passenger.doorId, undefined);
-  assert.equal(passenger.desiredDoorId, 'a');
-  assert.equal(state.doors.find((door) => door.id === 'b')?.occupancy, 0);
+  assert.equal(passenger.desiredDoorId, rerouteDoorId);
+  assert.equal(state.doors.find((door) => door.id === oldDoor.id)?.occupancy, 0);
   assert.ok(passenger.position.y >= passenger.radius, '撤回旧门的 NPC 应回到站台侧');
 });
 

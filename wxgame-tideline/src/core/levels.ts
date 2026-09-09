@@ -511,8 +511,9 @@ export const CAMPAIGN_LEVELS: readonly LevelConfig[] = CAMPAIGN_LEVEL_BASE.map(a
 export function createEndlessLevel(wave = 1): LevelConfig {
   const safeWave = Math.max(1, Math.floor(Number.isFinite(wave) ? wave : 1));
   const source = CAMPAIGN_LEVELS[(safeWave - 1) % CAMPAIGN_LEVELS.length] ?? CAMPAIGN_LEVELS[0];
-  const pressure = 1 + Math.min(1.4, (safeWave - 1) * 0.075);
-  const speedPressure = 1 + Math.min(0.55, (safeWave - 1) * 0.027);
+  // 前 10 轮建立主要难度曲线；之后放缓增长，让高难度保持可玩而不是快速撞上封顶。
+  const pressure = Math.min(2.05, 1 + Math.min(safeWave - 1, 9) * 0.075 + Math.max(0, safeWave - 10) * 0.025);
+  const speedPressure = Math.min(1.42, 1 + Math.min(safeWave - 1, 9) * 0.027 + Math.max(0, safeWave - 10) * 0.012);
   const events = (source.events ?? []).map((event) => ({
     ...event,
     id: `endless-${safeWave}-${event.id}`,

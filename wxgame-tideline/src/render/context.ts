@@ -431,7 +431,7 @@ export function appearanceCardRect(viewport: ViewportMetrics, index: number): Re
   const columns = content.width >= content.height ? 2 : 1;
   const gap = 12;
   const width = Math.min(340, (content.width - 32 - gap * (columns - 1)) / columns);
-  const rows = 4 / columns;
+  const rows = 8 / columns;
   const height = Math.min(100, (content.height - 106 - gap * (rows - 1)) / rows);
   return {
     x: content.x + (content.width - width * columns - gap * (columns - 1)) / 2 + (index % columns) * (width + gap),

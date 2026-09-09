@@ -30,7 +30,7 @@ export function objectiveCompleted(state: GameState, objective: LevelObjective):
 export function countObjectiveStars(state: GameState, level: LevelConfig): 0 | 1 | 2 | 3 {
   if (state.outcome !== 'success') return 0;
   const objectives = (level.objectives ?? []).slice(0, 3);
-  if (objectives.length === 0) return 1;
+  if (objectives.length === 0) return 0;
   return Math.min(3, objectives.filter((objective) => objectiveCompleted(state, objective)).length) as 0 | 1 | 2 | 3;
 }
 

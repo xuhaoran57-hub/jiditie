@@ -13,6 +13,7 @@ import {
   updateEndlessRecord,
   updateBestScore,
   updateBestStars,
+  APPEARANCE_OPTIONS,
 } from '../core/index.ts';
 import type {
   EventRecord,
@@ -1087,11 +1088,11 @@ export class GameRuntime {
     } else if (this.screenValue === 'appearance') {
       base.pageBackRect = pageBackRect(layout.viewport);
       const unlocked = new Set(unlockedAppearanceIds(this.saveValue));
-      base.appearanceHitAreas = ['default', 'seafoam', 'sunset', 'night']
+      base.appearanceHitAreas = APPEARANCE_OPTIONS.map((option) => option.id)
         .filter((id) => unlocked.has(id))
         .map((id) => ({
           id,
-          rect: appearanceCardRect(layout.viewport, ['default', 'seafoam', 'sunset', 'night'].indexOf(id)),
+          rect: appearanceCardRect(layout.viewport, APPEARANCE_OPTIONS.findIndex((option) => option.id === id)),
         }));
     } else if (this.screenValue === 'game') {
       base.joystickCenter = layout.joystickCenter;
