@@ -356,6 +356,35 @@ export function createRenderLayout(
   };
 }
 
+/** 失败结算的四个操作共用布局；窄屏按重试、路线／分享、广告分成两行。 */
+export function failedResultLayout(layout: RenderLayout) {
+  const content = layout.viewport.contentRect;
+  const height = Math.min(layout.orientation === 'landscape' ? 340 : 450, content.height - 24);
+  const panel: Rect = {
+    x: layout.resultRect.x,
+    y: content.y + (content.height - height) / 2,
+    width: layout.resultRect.width,
+    height,
+  };
+  const gap = 10;
+  const innerWidth = panel.width - 36;
+  const stacked = panel.width < 520;
+  const buttonHeight = 44;
+  const y = panel.y + panel.height - 30 - (stacked ? buttonHeight * 2 + gap : buttonHeight);
+  const navWidth = stacked ? (innerWidth - gap) / 2 : Math.min(84, (innerWidth - gap * 3) * 0.18);
+  const retry: Rect = { x: panel.x + 18, y, width: navWidth, height: buttonHeight };
+  const route: Rect = { ...retry, x: retry.x + navWidth + gap };
+  const rewardWidth = stacked ? navWidth : (innerWidth - navWidth * 2 - gap * 3) / 2;
+  const shareTicket: Rect = {
+    x: stacked ? retry.x : route.x + navWidth + gap,
+    y: stacked ? y + buttonHeight + gap : y,
+    width: rewardWidth,
+    height: buttonHeight,
+  };
+  const adHorn: Rect = { ...shareTicket, x: shareTicket.x + rewardWidth + gap };
+  return { panel, retry, route, shareTicket, adHorn };
+}
+
 /**
  * 路线页卡片的几何定义。canvas-ui 和微信触摸适配器都调用同一个函数，
  * 这样安全区、窄屏和 DPR 变化时不会出现“看得到但点不到”。
@@ -445,7 +474,7 @@ export function menuButtonRect(viewport: ViewportMetrics, index: number, count =
   const content = viewport.contentRect;
   const landscape = content.width >= content.height;
   const safeIndex = Math.max(0, Math.floor(Number.isFinite(index) ? index : 0));
-  const columns = landscape && content.width >= 560 ? 2 : 1;
+  const columns = landscape && content.width >= 440 ? 2 : 1;
   const gap = landscape ? 14 : 12;
   const width = landscape
     ? Math.min(300, Math.max(0, (content.width - 32 - gap * (columns - 1)) / columns))

@@ -5,6 +5,7 @@ import { GameRuntime } from '../src/runtime/index.ts';
 import { WxAudioAdapter } from '../src/platform/wx/index.ts';
 import { appearanceCardRect, menuButtonRect, routeListCardRect, routeListRect } from '../src/render/index.ts';
 import { emptySave, serializeSave } from '../src/core/save-schema.ts';
+import { APPEARANCE_OPTIONS } from '../src/core/appearance.ts';
 
 class MockContext {
   fillStyle = '#000';
@@ -134,7 +135,7 @@ test('外观预览卡片触摸能装备并持久化，未解锁外观不能装�
     runtime.start();
     runtime.openAppearance();
     assert.equal(runtime.setAppearance('night'), false);
-    const card = appearanceCardRect(runtime.renderer.context.layout.viewport, 1);
+    const card = appearanceCardRect(runtime.renderer.context.layout.viewport, APPEARANCE_OPTIONS.findIndex((option) => option.id === 'seafoam'));
     wx._listeners.touchStart({ changedTouches: [{ identifier: 1, x: card.x + card.width / 2, y: card.y + card.height / 2 }] });
     runtime.tick(0);
     assert.equal(runtime.saveData.appearanceId, 'seafoam');
@@ -171,6 +172,9 @@ test('M5 路线卡片触摸、摇杆输入和生命周期暂停可串联', () =>
   const runtime = new GameRuntime(wx, { seed: 11 });
   runtime.start();
   const startRect = menuButtonRect(runtime.renderer.context.layout.viewport, 0, 4);
+  // 新玩家先关闭已入包的新手礼提示，再操作主页。
+  runtime.closeItemPanel();
+  runtime.tick(0);
   wx._listeners.touchStart({ changedTouches: [{ identifier: 0, x: startRect.x + 12, y: startRect.y + 12 }] });
   runtime.tick(0);
   const routeRect = routeListCardRect(runtime.renderer.context.layout.viewport, 0, 0);

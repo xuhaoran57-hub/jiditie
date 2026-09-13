@@ -12,3 +12,4 @@ export * from './score.ts';
 export * from './save-schema.ts';
 export * from './appearance.ts';
 export * from './simulation.ts';
+export * from './items.ts';

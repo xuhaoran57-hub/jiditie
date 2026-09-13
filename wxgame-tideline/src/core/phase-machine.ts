@@ -92,6 +92,17 @@ export class PhaseMachine {
     this._outcome = null;
   }
 
+  extendBoarding(seconds: number): boolean {
+    if ((this._phase !== 'boarding' && this._phase !== 'warning')
+      || this._doorRemaining <= 0 || !Number.isFinite(seconds) || seconds <= 0) return false;
+    this._doorRemaining += seconds;
+    if (this._phase === 'warning' && this._doorRemaining > this.config.warningThreshold) {
+      this._phase = 'boarding';
+      this._phaseElapsed = 0;
+    }
+    return true;
+  }
+
   snapshot(): PhaseMachineSnapshot {
     return {
       phase: this._phase,

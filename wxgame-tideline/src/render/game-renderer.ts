@@ -1,4 +1,5 @@
 import type { GameState, LevelConfig, Rect, SaveSettings } from '../core/types.ts';
+import { renderItemUi, type ItemUiState } from './item-ui.ts';
 import { renderActors } from './actor-renderer.ts';
 import type { CanvasFactory, CanvasImageFactory, CanvasLike, ViewportInsets } from './context.ts';
 import { PlayerAppearanceSprites } from './player-appearance.ts';
@@ -27,6 +28,7 @@ import { loadPassengerAtlasSprite, loadPassengerFastSprite, loadPassengerLuggage
 export type RenderScreen = 'home' | 'game' | 'route' | 'briefing' | 'result' | 'achievements' | 'appearance' | 'settings';
 
 export interface RenderOptions {
+  itemUi?: ItemUiState;
   screen?: RenderScreen;
   paused?: boolean;
   showControls?: boolean;
@@ -143,6 +145,11 @@ export class GameRenderer {
   }
 
   render(state: GameState, level: LevelConfig, options: RenderOptions = {}): void {
+    this.renderScene(state, level, options);
+    if (options.itemUi) renderItemUi(this.context, options.screen ?? 'game', state, options.itemUi, options.paused);
+  }
+
+  private renderScene(state: GameState, level: LevelConfig, options: RenderOptions): void {
     const screen = options.screen ?? (state.phase === 'result' ? 'result' : 'game');
     if (screen === 'home') {
       this.context.clear('#0b1627');

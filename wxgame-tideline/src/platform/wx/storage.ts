@@ -3,6 +3,7 @@ import {
   emptySave,
   parseSave,
   serializeSave,
+  SAVE_VERSION,
 } from '../../core/save-schema.ts';
 
 export interface WxStorageApi {
@@ -12,6 +13,8 @@ export interface WxStorageApi {
 }
 
 export const DEFAULT_SAVE_KEY = 'tideline.save.v1';
+export type SaveLoadStatus = 'missing' | 'loaded' | 'corrupt' | 'unsupported' | 'unavailable';
+export interface SaveLoadResult { save: SaveData; status: SaveLoadStatus }
 
 /**
  * 存档适配器只处理序列化和异常回退，具体 schema 仍由 core/save-schema 负责。
@@ -27,11 +30,22 @@ export class WxStorageAdapter {
   }
 
   load(): SaveData {
-    if (!this.api.getStorageSync) return emptySave();
+    return this.loadWithStatus().save;
+  }
+
+  loadWithStatus(): SaveLoadResult {
+    if (!this.api.getStorageSync) return { save: emptySave(), status: 'unavailable' };
     try {
-      return parseSave(this.api.getStorageSync(this.key));
+      const raw = this.api.getStorageSync(this.key);
+      if (raw === undefined || raw === null || raw === '') return { save: emptySave(), status: 'missing' };
+      let value: unknown;
+      try { value = typeof raw === 'string' ? JSON.parse(raw) : raw; }
+      catch { return { save: emptySave(), status: 'corrupt' }; }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return { save: emptySave(), status: 'corrupt' };
+      if (Number((value as Record<string, unknown>).version ?? 0) > SAVE_VERSION) return { save: emptySave(), status: 'unsupported' };
+      return { save: parseSave(value), status: 'loaded' };
     } catch {
-      return emptySave();
+      return { save: emptySave(), status: 'unavailable' };
     }
   }
 

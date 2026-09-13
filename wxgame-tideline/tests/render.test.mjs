@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { APPEARANCE_OPTIONS } from '../src/core/appearance.ts';
 import { readFileSync } from 'node:fs';
 import { drawPlayerPreview } from '../src/render/actor-renderer.ts';
 import { playerAppearancePalette } from '../src/render/player-appearance.ts';
@@ -512,7 +513,7 @@ test('player Sprite loads asynchronously, switches frames, and keeps geometry fa
   assert.equal(spriteCallsAfterFailure, 2, 'failed image decoding should use geometry fallback');
 });
 
-test('外观页四套预览与游戏使用同一份换色图集，锁定外观仍可预览', () => {
+test('外观页全部预览与游戏使用同一份换色图集，锁定外观仍可预览', () => {
   const context = new MockContext();
   const image = { width: 256, height: 64, complete: true };
   const renderer = GameRenderer.fromCanvas(makeCanvas(context), 480, 320, 1, {}, MVP_LEVELS[0], {
@@ -525,11 +526,11 @@ test('外观页四套预览与游戏使用同一份换色图集，锁定外观�
   state.passengers = [];
   renderer.render(state, MVP_LEVELS[0], { screen: 'appearance', appearanceId: 'sunset', unlockedAppearanceIds: ['default', 'sunset'] });
   const previews = context.operations.filter(([name]) => name === 'drawImage');
-  assert.equal(previews.length, 4);
-  assert.equal(new Set(previews.map((op) => op[1])).size, 4);
-  assert.equal(context.operations.filter(([name, text]) => name === 'fillText' && text === '未解锁').length, 2);
+  assert.equal(previews.length, APPEARANCE_OPTIONS.length);
+  assert.equal(new Set(previews.map((op) => op[1])).size, APPEARANCE_OPTIONS.length);
+  assert.equal(context.operations.filter(([name, text]) => name === 'fillText' && text === '未解锁').length, APPEARANCE_OPTIONS.length - 2);
   renderer.render(state, MVP_LEVELS[0], { appearanceId: 'sunset', showControls: false });
-  assert.equal(context.operations.filter(([name]) => name === 'drawImage').at(-1)[1], previews[2][1]);
+  assert.equal(context.operations.filter(([name]) => name === 'drawImage').at(-1)[1], previews[APPEARANCE_OPTIONS.findIndex((option) => option.id === 'sunset')][1]);
 });
 
 test('外观预览图片缺失时使用对应配色的人物而非原色占位', () => {

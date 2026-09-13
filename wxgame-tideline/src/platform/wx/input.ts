@@ -46,6 +46,7 @@ export interface TouchMenuHitArea {
 }
 
 export interface TouchControlsLayout {
+  itemHitAreas?: readonly TouchMenuHitArea[];
   joystickCenter: Vec2;
   joystickRadius: number;
   guideButtonRect: Rect;
@@ -66,6 +67,7 @@ export interface TouchControlsLayout {
 }
 
 export type TouchCommand =
+  | { type: 'item-action'; id: string }
   | { type: 'pause' }
   | { type: 'restart' }
   | { type: 'select-door'; doorId: string }
@@ -139,6 +141,7 @@ function sameAreas<T extends { id: string; rect: Rect }>(
 
 function sameLayout(first: TouchControlsLayout, second: TouchControlsLayout): boolean {
   return first.joystickCenter.x === second.joystickCenter.x
+    && sameAreas(first.itemHitAreas, second.itemHitAreas)
     && first.joystickCenter.y === second.joystickCenter.y
     && first.joystickRadius === second.joystickRadius
     && sameRect(first.guideButtonRect, second.guideButtonRect)
@@ -265,6 +268,11 @@ export class WxTouchInputAdapter {
         }
       }
 
+      const itemAction = this.layout.itemHitAreas?.find((area) => hitTestRect(area.rect, position));
+      if (itemAction) {
+        this.commands.push({ type: 'item-action', id: itemAction.id });
+        continue;
+      }
       if (
         this.joystickId === null &&
         distance(position, this.layout.joystickCenter) <=

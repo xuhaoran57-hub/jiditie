@@ -53,6 +53,8 @@ wxgame-tideline/
 ## 文档入口
 
 - [GAME_DESIGN.md](./GAME_DESIGN.md)：产品定位、玩法、关卡、内容和验收目标。
+- [ITEM_SYSTEM_IMPLEMENTATION.md](./ITEM_SYSTEM_IMPLEMENTATION.md)：通勤背包、两种道具、分享参与奖励、激励视频配置及验证说明。
+- [ITEM_SYSTEM_DEVELOPMENT_PLAN.md](./ITEM_SYSTEM_DEVELOPMENT_PLAN.md)：道具系统设计与开发方案。
 - [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)：从工程初始化到微信审核发布的工作项和执行顺序。
 - [M7_TEST_MATRIX.md](./M7_TEST_MATRIX.md)：自动化、真机、生命周期和异常场景矩阵。
 - [M7_PERFORMANCE.md](./M7_PERFORMANCE.md)：220 人压力基准、包体预算和真机采样口径。

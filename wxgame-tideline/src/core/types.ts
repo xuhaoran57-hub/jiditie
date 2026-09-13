@@ -257,6 +257,7 @@ export interface ScoreResult {
 }
 
 export interface GameState {
+  itemUses: Record<ItemId, number>;
   levelId: string;
   seed: number;
   phase: Phase;
@@ -278,6 +279,7 @@ export interface GameState {
 }
 
 export interface SimulationInput {
+  useItem?: ItemId;
   move?: Vec2;
   /** 输入来源需要补偿渲染坐标缩放时使用；缺省为 1。 */
   moveScale?: number;
@@ -340,6 +342,8 @@ export interface SaveSettings {
 }
 
 export interface SaveData {
+  items: ItemSaveState;
+  unassisted: UnassistedRecords;
   version: number;
   unlockedLevelIds: string[];
   endlessUnlocked: boolean;
@@ -355,4 +359,23 @@ export interface SaveData {
     clears: number;
     totalGuides: number;
   };
+}
+
+export type ItemId = 'commute-horn' | 'delay-ticket';
+export interface ItemSaveState {
+  inventory: Record<ItemId, number>;
+  welcomeGiftStatus: 'eligible' | 'granted' | 'ineligible';
+  tutorialSeen: boolean;
+  recentGrantedRequestIds: string[];
+  pendingUse: null | { requestId: string; itemId: ItemId; runId: string };
+}
+export interface UnassistedRecords {
+  bestScores: Record<string, number>;
+  bestStars: Record<string, number>;
+  endlessBestWave: number;
+  endlessBestScore: number;
+}
+export interface ItemUseResult {
+  used: boolean;
+  reason?: 'phase' | 'no-target' | 'limit';
 }

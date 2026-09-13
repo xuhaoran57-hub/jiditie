@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   GameSimulation,
+  SAVE_VERSION,
   CAMPAIGN_LEVELS,
   createEndlessLevel,
   calculateScore,
@@ -216,6 +217,25 @@ test('玩家只能从打开的车门进入车厢内部', () => {
   assert.equal(state.doors[0].open, true);
   assert.equal(state.player.inCarriage, true);
   assert.ok(state.player.position.y <= level.trainBounds.y + level.trainBounds.height - state.player.radius);
+});
+
+test('player stays inside the carriage floor after entering and cannot run back onto the platform', () => {
+  const simulation = new GameSimulation('sea-gate', 1201);
+  const state = simulation.getState();
+  const radius = state.player.radius;
+  const train = simulation.level.trainBounds;
+  state.player.position = { x: 100, y: -100 };
+
+  simulation.movePlayer({ x: 0, y: 1 }, 0.6);
+  assert.equal(state.player.inCarriage, true);
+  assert.ok(state.player.position.y <= train.y + train.height - 28 - radius + 1e-8);
+
+  simulation.movePlayer({ x: 0, y: -1 }, 0.8);
+  assert.ok(state.player.position.y >= train.y + 112 + radius - 1e-8);
+
+  state.player.position.x = 100;
+  simulation.movePlayer({ x: 1, y: 0 }, 1.5);
+  assert.ok(state.player.position.x <= train.x + train.width - 24 - radius + 1e-8);
 });
 
 test('疏导最多影响两人，并按人流方向和敏感群组调整礼让值', () => {
@@ -517,7 +537,7 @@ test('损坏或未来版本存档安全回退，正常存档可往返', () => {
   assert.deepEqual(parseSave({ version: 999, unlockedLevelIds: ['star-ring'] }), fallback);
 
   const old = parseSave({ version: 0, unlockedLevels: ['cloud-harbor'], scores: { 'sea-gate': 87 } });
-  assert.equal(old.version, 3);
+  assert.equal(old.version, SAVE_VERSION);
   assert.ok(old.unlockedLevelIds.includes('sea-gate'));
   assert.equal(old.bestScores['sea-gate'], 87);
   const roundTrip = parseSave(serializeSave(old));

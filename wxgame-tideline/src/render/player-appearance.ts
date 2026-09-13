@@ -6,6 +6,10 @@ const PALETTES = {
   seafoam: { shirt: '#8aefb8', shadow: '#39986c', highlight: '#e4fff0' },
   sunset: { shirt: '#ff9a58', shadow: '#b65b36', highlight: '#fff0d5' },
   night: { shirt: '#7799ff', shadow: '#3a5199', highlight: '#e6edff' },
+  endless5: { shirt: '#b9d5e8', shadow: '#54758d', highlight: '#f0fbff' },
+  endless10: { shirt: '#8ed8d1', shadow: '#347d83', highlight: '#e4fffb' },
+  endless15: { shirt: '#f3c85b', shadow: '#a36c2c', highlight: '#fff5c9' },
+  endless20: { shirt: '#d8e7ff', shadow: '#6178b1', highlight: '#ffffff' },
 } as const;
 
 export function playerAppearancePalette(id: string) {

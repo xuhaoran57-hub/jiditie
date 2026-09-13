@@ -174,7 +174,7 @@ export function renderEffects(
     drawSafeZonePulse(renderContext, level, state);
     for (const event of state.events) {
       const age = eventAge(state.elapsed, event.at);
-      if (event.type === 'guide' && event.detail) {
+      if ((event.type === 'guide' || event.type === 'item-horn') && event.detail) {
         drawGuideWave(renderContext, state, age);
         for (const [index, id] of event.detail.split(',').filter(Boolean).entries()) {
           const passenger = findPassenger(state, id);
@@ -186,8 +186,25 @@ export function renderEffects(
       } else if (event.type === 'collision') {
         drawCollisionFlash(renderContext, state, age);
       }
+      if (event.type === 'item-horn' && age >= 0 && age < 0.6) {
+        const ctx = renderContext.ctx;
+        ctx.save(); ctx.globalAlpha = 1 - age / 0.6; ctx.strokeStyle = '#ffd36a'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(state.player.position.x, state.player.position.y, 24 + age * 140, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      }
     }
   });
+
+  let delay: GameState['events'][number] | undefined;
+  for (let i = state.events.length - 1; i >= 0; i -= 1) {
+    if (state.events[i].type === 'item-delay') { delay = state.events[i]; break; }
+  }
+  if (delay && state.elapsed - delay.at < 1 && state.elapsed >= delay.at) {
+    renderContext.withScreen(() => {
+      const { ctx, layout } = renderContext;
+      ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#ffd36a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('+3 秒', layout.viewport.contentRect.x + layout.viewport.contentRect.width / 2, layout.viewport.contentRect.y + 86);
+    });
+  }
 
   if (state.phase === 'warning') {
     const { ctx, layout } = renderContext;

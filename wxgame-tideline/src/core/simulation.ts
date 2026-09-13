@@ -1,4 +1,6 @@
 import { useGuideAbility } from './ability.ts';
+import { checkItemUse, DELAY_SECONDS, emptyItemCounts } from './items.ts';
+import type { ItemId, ItemUseResult } from './types.ts';
 import {
   activePassengers,
   createPassengers,
@@ -99,6 +101,22 @@ function boardingBounds(level: LevelConfig): Rect {
     level.trainBounds.y + level.trainBounds.height,
   );
   return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function playerCarriageBounds(level: LevelConfig): Rect {
+  const train = level.trainBounds;
+  // Keep the player on the visible carriage floor, below the window band and
+  // above the lower shell. The door remains the only entry point into this
+  // smaller interior area.
+  const horizontalInset = 24;
+  const topInset = 112;
+  const bottomInset = 28;
+  return {
+    x: train.x + horizontalInset,
+    y: train.y + topInset,
+    width: Math.max(2, train.width - horizontalInset * 2),
+    height: Math.max(2, train.height - topInset - bottomInset),
+  };
 }
 
 function isInsideRectWithRadius(position: Vec2, bounds: Rect, radius: number): boolean {
@@ -285,12 +303,29 @@ export class GameSimulation {
     return useGuideAbility(this.state, this.level, this.state.elapsed);
   }
 
+  checkItem(id: ItemId): ItemUseResult { return checkItemUse(this.state, this.level, id); }
+
+  useItem(id: ItemId): ItemUseResult {
+    const checked = this.checkItem(id);
+    if (!checked.used) return checked;
+    if (id === 'commute-horn') {
+      if (!useGuideAbility(this.state, this.level, this.state.elapsed, true).used) return { used: false, reason: 'no-target' };
+    } else {
+      if (!this.machine.extendBoarding(DELAY_SECONDS)) return { used: false, reason: 'phase' };
+      this.syncFromMachine();
+      this.state.events.push({ type: 'item-delay', at: this.state.elapsed, detail: String(DELAY_SECONDS) });
+    }
+    this.state.itemUses[id] += 1;
+    return { used: true };
+  }
+
   step(dt: number, input: SimulationInput = {}): GameState {
     if (this.state.phase === 'result') return this.state;
     if (!Number.isFinite(dt) || dt <= 0) return this.state;
 
     if (input.selectDoorId) this.selectDoor(input.selectDoorId);
-    if (input.useGuide) this.useGuide();
+    const itemUsed = input.useItem ? this.useItem(input.useItem).used : false;
+    if (input.useGuide && !itemUsed) this.useGuide();
     this.updateEventState();
 
     let remaining = dt;
@@ -603,6 +638,7 @@ export class GameSimulation {
     const state: GameState = {
       levelId: this.level.id,
       seed,
+      itemUses: emptyItemCounts(),
       phase: this.machine.phase,
       phaseElapsed: this.machine.phaseElapsed,
       elapsed: 0,
@@ -738,6 +774,7 @@ export class GameSimulation {
   private constrainPlayerPosition(candidate: Vec2, previous: Vec2): Vec2 {
     const radius = this.state.player.radius;
     const train = this.level.trainBounds;
+    const carriage = playerCarriageBounds(this.level);
     const platform = this.walkableBounds();
     const union = boardingBounds(this.level);
     const next = finiteVec(candidate, previous);
@@ -747,7 +784,7 @@ export class GameSimulation {
     const canTraverse = this.canTraverseOpenDoor(prior, next);
 
     if (nextInside) {
-      if (priorInside || canTraverse) return clampPointToRect(next, train, radius);
+      if (priorInside || canTraverse) return clampPointToRect(next, carriage, radius);
       return clampPointToRect(next, platform, radius);
     }
 
@@ -758,7 +795,7 @@ export class GameSimulation {
     }
 
     if (priorInside) {
-      return clampPointToRect(prior, train, radius);
+      return clampPointToRect(prior, carriage, radius);
     }
 
     return clampPointToRect(next, platform, radius);

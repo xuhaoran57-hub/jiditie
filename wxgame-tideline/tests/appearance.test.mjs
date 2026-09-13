@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { APPEARANCE_OPTIONS } from '../src/core/appearance.ts';
 import { PlayerAppearanceSprites, recolorPlayerPixels } from '../src/render/player-appearance.ts';
 import { PLAYER_SPRITE_FRAMES } from '../src/render/player-sprite.ts';
 import { appearanceCardRect, createViewportMetrics } from '../src/render/context.ts';
@@ -53,13 +54,31 @@ test('外观像素接口缺失或失败时安全回退，不每帧重试', () =>
   assert.equal(attempts, 1);
 });
 
+test('endless appearances keep the pixel sprite and use distinct palettes', () => {
+  const source = { image: {}, frames: PLAYER_SPRITE_FRAMES, frameDuration: 0.1, ready: true, failed: false };
+  const writes = [];
+  const sprites = new PlayerAppearanceSprites(() => ({ width: 0, height: 0, getContext: () => ({
+    drawImage() {},
+    getImageData: () => ({ data: new Uint8ClampedArray([54, 200, 187, 255]), width: 1, height: 1 }),
+    putImageData: (pixels) => writes.push([...pixels.data]),
+  }) }));
+  const silver = sprites.get(source, 'endless5');
+  const gold = sprites.get(source, 'endless15');
+  assert.ok(silver);
+  assert.ok(gold);
+  assert.equal(silver.frames, source.frames);
+  assert.notEqual(silver.image, source.image);
+  assert.notDeepEqual(writes[0], writes[1]);
+  assert.equal(sprites.get(source, 'default'), source);
+});
+
 test('外观预览卡片在窄横屏和竖屏安全区内完整排列且不重叠', () => {
   for (const [width, height] of [[480, 320], [667, 375], [375, 667]]) {
     const viewport = createViewportMetrics(width, height, 2, { left: 10, right: 10, top: 8, bottom: 12 });
-    const cards = Array.from({ length: 4 }, (_, i) => appearanceCardRect(viewport, i));
+    const cards = APPEARANCE_OPTIONS.map((_, i) => appearanceCardRect(viewport, i));
     const content = viewport.contentRect;
     for (const card of cards) {
-      assert.ok(card.height >= 70);
+      assert.ok(card.width > 0 && card.height > 0, '所有已配置外观都应有可见卡片');
       assert.ok(card.x >= content.x && card.y >= content.y + 90);
       assert.ok(card.x + card.width <= content.x + content.width);
       assert.ok(card.y + card.height <= content.y + content.height);

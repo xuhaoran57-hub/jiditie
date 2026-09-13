@@ -1,6 +1,7 @@
 import type { SaveData, SaveSettings } from './types.ts';
+import { emptyItemSave, isItemId, ITEM_IDS } from './items.ts';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const CURRENT_SAVE_VERSION = SAVE_VERSION;
 export const DEFAULT_FIRST_LEVEL = 'sea-gate';
 
@@ -35,6 +36,8 @@ function stringList(value: unknown): string[] {
 export function emptySave(): SaveData {
   return {
     version: SAVE_VERSION,
+    items: emptyItemSave(),
+    unassisted: { bestScores: {}, bestStars: {}, endlessBestWave: 0, endlessBestScore: 0 },
     unlockedLevelIds: [DEFAULT_FIRST_LEVEL],
     endlessUnlocked: false,
     endlessBestWave: 0,
@@ -74,8 +77,30 @@ function sanitize(value: Record<string, unknown>): SaveData {
   const statsSource = value.stats && typeof value.stats === 'object' && !Array.isArray(value.stats)
     ? (value.stats as Record<string, unknown>)
     : {};
+  const items = emptyItemSave();
+  const rawItems = objectValue(value.items);
+  const inventory = objectValue(rawItems.inventory);
+  for (const id of ITEM_IDS) items.inventory[id] = finiteInteger(inventory[id], 0);
+  if (rawItems.welcomeGiftStatus === 'granted' || rawItems.welcomeGiftStatus === 'eligible') {
+    items.welcomeGiftStatus = rawItems.welcomeGiftStatus;
+  }
+  items.tutorialSeen = rawItems.tutorialSeen === true;
+  items.recentGrantedRequestIds = stringList(rawItems.recentGrantedRequestIds).slice(-64);
+  const pending = objectValue(rawItems.pendingUse);
+  if (isItemId(pending.itemId) && typeof pending.requestId === 'string' && pending.requestId
+    && typeof pending.runId === 'string' && pending.runId) {
+    items.pendingUse = { itemId: pending.itemId, requestId: pending.requestId, runId: pending.runId };
+  }
+  const unassisted = Number(value.version ?? 0) < 4 ? value : objectValue(value.unassisted);
   return {
     version: SAVE_VERSION,
+    items,
+    unassisted: {
+      bestScores: scoreMap(unassisted.bestScores ?? unassisted.scores),
+      bestStars: starsMap(unassisted.bestStars),
+      endlessBestWave: finiteInteger(unassisted.endlessBestWave, 0),
+      endlessBestScore: scoreMap({ value: unassisted.endlessBestScore }).value ?? 0,
+    },
     unlockedLevelIds: unlocked,
     endlessUnlocked: value.endlessUnlocked === true || unlocked.includes('endless'),
     endlessBestWave: finiteInteger(value.endlessBestWave, fallback.endlessBestWave),
@@ -128,6 +153,10 @@ export function updateBestScore(save: SaveData, levelId: string, score: number):
   const safeScore = Math.round(Math.min(100, Math.max(0, Number.isFinite(score) ? score : 0)));
   next.bestScores[levelId] = Math.max(next.bestScores[levelId] ?? 0, safeScore);
   return next;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 export function updateBestStars(save: SaveData, levelId: string, stars: number): SaveData {

@@ -1,4 +1,4 @@
-import type { GameState, LevelConfig, SaveSettings, ScoreResult } from '../core/types.ts';
+import type { GameState, LevelConfig, LevelObjective, SaveSettings, ScoreResult } from '../core/types.ts';
 import { clamp } from '../core/vector.ts';
 import type { Canvas2DContextLike } from './context.ts';
 import { APPEARANCE_OPTIONS } from '../core/appearance.ts';
@@ -6,6 +6,7 @@ import { drawPlayerPreview } from './actor-renderer.ts';
 import type { PlayerSpriteAsset } from './player-sprite.ts';
 import {
   drawCenteredText,
+  failedResultLayout,
   fillRoundRect,
   RenderContext,
   routeCardRect,
@@ -72,6 +73,46 @@ function drawObjectiveResults(ctx: Canvas2DContextLike, level: LevelConfig, stat
     fillTextCompat(ctx, `${completed ? '✓' : '○'} ${objective.label}`, x, y + index * 16, width);
   });
   return objectives.length * 16;
+}
+
+function objectiveShortLabel(objective: LevelObjective): string {
+  switch (objective.id) {
+    case 'alighting-rate': return `下车${Math.round(objective.minRatio * 100)}%`;
+    case 'finish-time': return `提前${objective.minRemaining}s`;
+    case 'guide-limit': return `疏导≤${objective.maxUses}`;
+    case 'courtesy-score': return `礼让≥${Math.round(objective.minScore)}`;
+    case 'stamina': return `体力≥${Math.round(objective.minRatio * 100)}%`;
+    case 'no-collision': return '零碰撞';
+    default: return '';
+  }
+}
+
+/** 横屏结算使用独立条件卡片，避免条件文案和评分条挤在同一行。 */
+function drawLandscapeObjectiveCards(
+  ctx: Canvas2DContextLike,
+  level: LevelConfig,
+  state: GameState,
+  x: number,
+  y: number,
+  width: number,
+): number {
+  const objectives = (level.objectives ?? []).slice(0, 3);
+  if (objectives.length === 0) return 0;
+  const gap = 8;
+  const cardWidth = (width - gap * (objectives.length - 1)) / objectives.length;
+  const cardHeight = 28;
+  objectives.forEach((objective, index) => {
+    const completed = objectiveCompleted(state, objective);
+    const cardX = x + index * (cardWidth + gap);
+    fillRoundRect(ctx, cardX, y, cardWidth, cardHeight, 8, completed ? '#245a61' : '#1b3b52');
+    strokeRoundRect(ctx, cardX, y, cardWidth, cardHeight, 8, completed ? UI.accent : '#45627a', 1);
+    ctx.font = canvasFont(600, 10);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = completed ? UI.accent : UI.muted;
+    fillTextCompat(ctx, `${completed ? '✓' : '○'} ${objectiveShortLabel(objective)}`, cardX + cardWidth / 2, y + cardHeight / 2, Math.max(20, cardWidth - 10));
+  });
+  return cardHeight;
 }
 
 function drawBar(
@@ -335,15 +376,13 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
       y: rect.y + 56,
     }, canvasFont(400, 12), UI.muted);
     if (score) {
-      if (level.id !== 'endless') drawObjectiveResults(ctx, level, state, rect.x + 24, rect.y + 112, rect.width - 48);
       drawCenteredText(ctx, score.medal === 'none' ? '\u7ee7\u7eed\u89c2\u5bdf' : score.medal.toUpperCase() + ' MEDAL', {
         x: rect.x + rect.width / 2,
         y: rect.y + 82,
       }, canvasFont(700, 15), medalColor(score.medal));
-      drawCenteredText(ctx, `三星目标 ${score.stars} / 3`, {
-        x: rect.x + rect.width / 2,
-        y: rect.y + 101,
-      }, canvasFont(600, 11), UI.gold);
+      const objectiveHeight = level.id !== 'endless'
+        ? drawLandscapeObjectiveCards(ctx, level, state, rect.x + 24, rect.y + 106, rect.width - 48)
+        : 0;
       const rows: Array<[string, number]> = [
         ['\u6548\u7387', score.efficiency],
         ['\u793c\u8ba9', score.courtesy],
@@ -355,7 +394,7 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
         const column = index % 2;
         const row = Math.floor(index / 2);
         const cellX = rect.x + 24 + column * (cellWidth + columnGap);
-        const cellY = rect.y + 126 + row * 34;
+        const cellY = rect.y + 126 + objectiveHeight + (objectiveHeight > 0 ? 10 : 0) + row * 34;
         ctx.font = canvasFont(400, 11);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -396,8 +435,58 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
   });
 }
 
+function renderFailedResultScreen(renderContext: RenderContext, level: LevelConfig, state: GameState): void {
+  const { ctx, layout } = renderContext;
+  const actions = failedResultLayout(layout);
+  const rect = actions.panel;
+  renderContext.withScreen(() => {
+    ctx.globalAlpha = 0.76;
+    ctx.fillStyle = '#10243a';
+    ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
+    ctx.globalAlpha = 1;
+    fillRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 22, UI.panel);
+    strokeRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 22, UI.warning, 2);
+    drawCenteredText(ctx, '这次错过了', { x: rect.x + rect.width / 2, y: rect.y + 27 }, canvasFont(700, 23), UI.text);
+    drawCenteredText(ctx, level.stationName, { x: rect.x + rect.width / 2, y: rect.y + 53 }, canvasFont(400, 12), UI.muted);
+    const score = state.score;
+    if (score) {
+      const objectiveY = rect.y + 78;
+      const objectiveHeight = level.id === 'endless' ? 0 : layout.orientation === 'landscape'
+        ? drawLandscapeObjectiveCards(ctx, level, state, rect.x + 18, objectiveY, rect.width - 36)
+        : drawObjectiveResults(ctx, level, state, rect.x + 18, objectiveY, rect.width - 36);
+      const totalY = actions.retry.y - 22;
+      const statsStart = objectiveY + objectiveHeight + 16;
+      const statsY = statsStart + Math.max(0, (totalY - statsStart - 30) / 2);
+      const rows: Array<[string, number]> = [['效率', score.efficiency], ['礼让', score.courtesy], ['体力', score.stamina]];
+      const cellWidth = (rect.width - 36) / rows.length;
+      rows.forEach(([name, value], index) => {
+        const x = rect.x + 18 + cellWidth * index;
+        drawCenteredText(ctx, `${name} ${value}`, { x: x + cellWidth / 2, y: statsY }, canvasFont(500, 12), UI.muted);
+        if (totalY - statsY >= 44) {
+          drawBar(ctx, { x: x + 10, y: statsY + 16, width: cellWidth - 20, height: 6 }, value / 100, value >= 80 ? UI.accent : UI.gold);
+        }
+      });
+      drawCenteredText(ctx, `总分 ${score.total}`, { x: rect.x + rect.width / 2, y: totalY }, canvasFont(700, 20), UI.text);
+    }
+    for (const button of [
+      { rect: actions.retry, label: '重试', color: UI.accent },
+      { rect: actions.route, label: '路线', color: UI.muted },
+    ]) {
+      fillRoundRect(ctx, button.rect.x, button.rect.y, button.rect.width, button.rect.height, 12, UI.panelAlt);
+      strokeRoundRect(ctx, button.rect.x, button.rect.y, button.rect.width, button.rect.height, 12, button.color, 1);
+      drawCenteredText(ctx, button.label, {
+        x: button.rect.x + button.rect.width / 2, y: button.rect.y + button.rect.height / 2,
+      }, canvasFont(600, 13), UI.text);
+    }
+  });
+}
+
 export function renderResultScreen(renderContext: RenderContext, level: LevelConfig, state: GameState): void {
   const { ctx, layout } = renderContext;
+  if (state.outcome === 'failure') {
+    renderFailedResultScreen(renderContext, level, state);
+    return;
+  }
   if (layout.orientation === 'landscape') {
     renderLandscapeResultScreen(renderContext, level, state);
     return;
@@ -416,15 +505,19 @@ export function renderResultScreen(renderContext: RenderContext, level: LevelCon
 
     if (score) {
       drawCenteredText(ctx, score.medal === 'none' ? '继续观察，再试一局' : `${score.medal.toUpperCase()} 牌`, { x: rect.x + rect.width / 2, y: rect.y + 108 }, canvasFont(700, 18), medalColor(score.medal));
-      drawCenteredText(ctx, level.id === 'endless' ? '本轮坚持记录' : `三星目标 ${score.stars} / 3`, { x: rect.x + rect.width / 2, y: rect.y + 132 }, canvasFont(600, 12), UI.gold);
-      if (level.id !== 'endless') drawObjectiveResults(ctx, level, state, rect.x + 22, rect.y + 152, rect.width - 44);
+      if (level.id === 'endless') {
+        drawCenteredText(ctx, '本轮坚持记录', { x: rect.x + rect.width / 2, y: rect.y + 132 }, canvasFont(600, 12), UI.gold);
+      }
+      const objectiveHeight = level.id !== 'endless'
+        ? drawObjectiveResults(ctx, level, state, rect.x + 22, rect.y + 152, rect.width - 44)
+        : 0;
       const rows: Array<[string, number]> = [
         ['效率', score.efficiency],
         ['礼让', score.courtesy],
         ['体力', score.stamina],
       ];
       rows.forEach(([label, value], index) => {
-        const y = rect.y + 158 + index * 28;
+        const y = rect.y + 158 + objectiveHeight + (objectiveHeight > 0 ? 10 : 0) + index * 28;
         ctx.font = canvasFont(400, 13);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
