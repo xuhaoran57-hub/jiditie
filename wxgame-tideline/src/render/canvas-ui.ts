@@ -1,4 +1,4 @@
-import type { GameState, LevelConfig, LevelObjective, SaveSettings, ScoreResult } from '../core/types.ts';
+import type { GameState, ItemId, LevelConfig, LevelObjective, SaveSettings, ScoreResult } from '../core/types.ts';
 import { clamp } from '../core/vector.ts';
 import type { Canvas2DContextLike } from './context.ts';
 import { APPEARANCE_OPTIONS } from '../core/appearance.ts';
@@ -13,6 +13,7 @@ import {
   routeListRect,
   routeListCardRect,
   menuButtonRect,
+  homePageLayout,
   appearanceCardRect,
   pageBackRect,
   worldDirectionToScreen,
@@ -435,9 +436,9 @@ function renderLandscapeResultScreen(renderContext: RenderContext, level: LevelC
   });
 }
 
-function renderFailedResultScreen(renderContext: RenderContext, level: LevelConfig, state: GameState): void {
+function renderFailedResultScreen(renderContext: RenderContext, level: LevelConfig, state: GameState, claimedRewards: readonly ItemId[]): void {
   const { ctx, layout } = renderContext;
-  const actions = failedResultLayout(layout);
+  const actions = failedResultLayout(layout, claimedRewards);
   const rect = actions.panel;
   renderContext.withScreen(() => {
     ctx.globalAlpha = 0.76;
@@ -481,10 +482,10 @@ function renderFailedResultScreen(renderContext: RenderContext, level: LevelConf
   });
 }
 
-export function renderResultScreen(renderContext: RenderContext, level: LevelConfig, state: GameState): void {
+export function renderResultScreen(renderContext: RenderContext, level: LevelConfig, state: GameState, claimedRewards: readonly ItemId[] = []): void {
   const { ctx, layout } = renderContext;
   if (state.outcome === 'failure') {
-    renderFailedResultScreen(renderContext, level, state);
+    renderFailedResultScreen(renderContext, level, state, claimedRewards);
     return;
   }
   if (layout.orientation === 'landscape') {
@@ -769,6 +770,7 @@ function drawMenuIcon(ctx: Canvas2DContextLike, kind: 'play' | 'trophy' | 'shirt
 export function renderHomePage(renderContext: RenderContext): void {
   const { ctx, layout } = renderContext;
   const content = layout.viewport.contentRect;
+  const home = homePageLayout(layout.viewport);
   renderContext.withScreen(() => {
     ctx.fillStyle = '#091525';
     ctx.fillRect(0, 0, layout.viewport.width, layout.viewport.height);
@@ -781,8 +783,8 @@ export function renderHomePage(renderContext: RenderContext): void {
     };
     fillRoundRect(ctx, frame.x, frame.y, frame.width, frame.height, 24, '#0c1b2d');
     strokeRoundRect(ctx, frame.x, frame.y, frame.width, frame.height, 24, '#1e5875', 1);
-    drawCenteredText(ctx, '\u6324\u4e0a\u8fd9\u73ed\u8f66', { x: content.x + content.width / 2, y: content.y + 42 }, canvasFont(800, 29), UI.text);
-    drawCenteredText(ctx, '\u6f6e\u6c50\u7ebf \u00b7 \u901a\u52e4\u6311\u6218', { x: content.x + content.width / 2, y: content.y + 70 }, canvasFont(400, 13), UI.muted);
+    drawCenteredText(ctx, '\u6324\u4e0a\u8fd9\u73ed\u8f66', home.title, canvasFont(800, 29), UI.text);
+    drawCenteredText(ctx, '\u6f6e\u6c50\u7ebf \u00b7 \u901a\u52e4\u6311\u6218', home.subtitle, canvasFont(400, 13), UI.muted);
     const buttons = [
       ['\u5f00\u59cb\u6e38\u620f', '\u9009\u62e9\u5df2\u89e3\u9501\u5173\u5361', 'play'],
       ['\u6210\u5c31', '\u67e5\u770b\u4e09\u661f\u76ee\u6807\u4e0e\u79f0\u53f7', 'trophy'],
@@ -790,7 +792,7 @@ export function renderHomePage(renderContext: RenderContext): void {
       ['\u8bbe\u7f6e', '\u58f0\u97f3\u4e0e\u9707\u52a8', 'settings'],
     ] as const;
     buttons.forEach(([label, detail, kind], index) => {
-      const rect = menuButtonRect(layout.viewport, index, buttons.length);
+      const rect = home.buttons[index];
       const selected = index === 0;
       fillRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 14, selected ? '#123e53' : '#12304a');
       strokeRoundRect(ctx, rect.x, rect.y, rect.width, rect.height, 14, selected ? UI.accent : '#235f84', selected ? 2 : 1);

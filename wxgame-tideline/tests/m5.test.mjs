@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { GameRuntime } from '../src/runtime/index.ts';
 import { WxAudioAdapter } from '../src/platform/wx/index.ts';
-import { appearanceCardRect, menuButtonRect, routeListCardRect, routeListRect } from '../src/render/index.ts';
+import { appearanceCardRect, homePageLayout, routeListCardRect, routeListRect } from '../src/render/index.ts';
 import { emptySave, serializeSave } from '../src/core/save-schema.ts';
 import { APPEARANCE_OPTIONS } from '../src/core/appearance.ts';
 
@@ -171,7 +171,7 @@ test('M5 路线卡片触摸、摇杆输入和生命周期暂停可串联', () =>
   const wx = createMockWx();
   const runtime = new GameRuntime(wx, { seed: 11 });
   runtime.start();
-  const startRect = menuButtonRect(runtime.renderer.context.layout.viewport, 0, 4);
+  const startRect = homePageLayout(runtime.renderer.context.layout.viewport).buttons[0];
   // 新玩家先关闭已入包的新手礼提示，再操作主页。
   runtime.closeItemPanel();
   runtime.tick(0);

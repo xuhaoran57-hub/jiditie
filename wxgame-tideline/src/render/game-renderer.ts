@@ -214,7 +214,7 @@ export class GameRenderer {
     renderHud(this.context, level, state);
 
     if (screen === 'result' || state.phase === 'result') {
-      renderResultScreen(this.context, level, state);
+      renderResultScreen(this.context, level, state, options.itemUi?.claimedResultRewards);
     } else if (options.showControls !== false) {
       renderControls(this.context, state, level.guide.cost);
     }

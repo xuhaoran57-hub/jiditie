@@ -13,7 +13,7 @@ const DEFAULT_LIMITS = Object.freeze({
   packageBytes: 4 * 1024 * 1024,
   distBytes: 1 * 1024 * 1024,
   wavBytes: 256 * 1024,
-  loopWavBytes: 512 * 1024,
+  loopWavBytes: 1024 * 1024,
   svgBytes: 128 * 1024,
 });
 

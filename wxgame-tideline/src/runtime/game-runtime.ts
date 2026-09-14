@@ -54,6 +54,7 @@ import {
   failedResultLayout,
   appearanceCardRect,
   menuButtonRect,
+  homePageLayout,
   pageBackRect,
   routeCardRect,
   routeListRect,
@@ -249,10 +250,11 @@ export class GameRuntime {
   private recoverySettings: Partial<SaveSettings> = {};
   private recoveryAppearanceId?: string;
   private itemPanel: ItemPanel = null;
-  private supplyFromInventory = false;
   private selectedItem: ItemId = 'commute-horn';
   private rewardStatus: RewardStatus = 'idle';
   private rewardRequest?: RewardRequest;
+  private rewardResultRunId?: string;
+  private readonly claimedResultRewards = new Set<ItemId>();
   private itemMessage = '';
   private messageUntil = 0;
   private usedItems = emptyItemCounts();
@@ -382,13 +384,12 @@ export class GameRuntime {
     this.syncLoopPause();
 
     if (this.saveValue.items.pendingUse && !this.rewards.recoverUse()) {
-      this.itemPanel = 'inventory';
-      this.itemMessage = '有未完成的道具使用，恢复存储后重试';
+      this.notice('有未完成的道具使用，恢复存储后重试');
     }
     if (this.saveValue.items.welcomeGiftStatus === 'eligible') {
       const granted = this.rewards.welcome();
       this.itemPanel = 'welcome';
-      this.itemMessage = granted ? '两种道具已放入背包' : '暂时无法保存，请重试领取';
+      this.itemMessage = granted ? '两种道具已领取，进入游戏后点击使用' : '暂时无法保存，请重试领取';
     }
     this.syncLoopPause();
     this.updateInputLayout();
@@ -821,6 +822,7 @@ export class GameRuntime {
     const safe = safeIndex(index, this.levels.length);
     const level = this.levels[safe];
     if (!level || !this.isUnlocked(level.id)) return false;
+    this.claimedResultRewards.clear();
     this.selectedLevelIndexValue = safe;
     this.endlessActive = level.id === ENDLESS_LEVEL_ID;
     this.endlessWave = this.endlessActive ? 1 : 0;
@@ -1171,11 +1173,12 @@ export class GameRuntime {
     }
 
     if (this.screenValue === 'home') {
+      const home = homePageLayout(layout.viewport);
       base.menuHitAreas = [
-        { id: 'start', rect: menuButtonRect(layout.viewport, 0, 4) },
-        { id: 'achievements', rect: menuButtonRect(layout.viewport, 1, 4) },
-        { id: 'appearance', rect: menuButtonRect(layout.viewport, 2, 4) },
-        { id: 'settings', rect: menuButtonRect(layout.viewport, 3, 4) },
+        { id: 'start', rect: home.buttons[0] },
+        { id: 'achievements', rect: home.buttons[1] },
+        { id: 'appearance', rect: home.buttons[2] },
+        { id: 'settings', rect: home.buttons[3] },
       ];
     } else if (this.screenValue === 'route') {
       base.pageBackRect = pageBackRect(layout.viewport);
@@ -1223,7 +1226,7 @@ export class GameRuntime {
     } else {
       base.resultRetryRect = layout.resultRetryRect;
       if (this.state?.outcome === 'failure') {
-        const actions = failedResultLayout(layout);
+        const actions = failedResultLayout(layout, [...this.claimedResultRewards]);
         base.resultRetryRect = actions.retry;
         base.resultRouteRect = actions.route;
       } else if (this.state?.score?.success) {
@@ -1241,6 +1244,7 @@ export class GameRuntime {
     return {
       panel: this.itemPanel, selected: this.selectedItem, status: this.rewardStatus,
       inventory: { ...this.saveValue.items.inventory }, used: { ...this.usedItems },
+      claimedResultRewards: [...this.claimedResultRewards],
       message: this.itemPanel || this.now() < this.messageUntil ? this.itemMessage : '',
       adAvailable: this.rewardedAd.available, shareAvailable: this.share.available,
       endless: this.currentLevel.id === ENDLESS_LEVEL_ID,
@@ -1249,20 +1253,24 @@ export class GameRuntime {
     };
   }
 
-  openInventory(): void { this.openItemPanel('inventory'); }
   openSupply(itemId: ItemId = this.selectedItem): void {
-    this.supplyFromInventory = this.itemPanel === 'inventory';
     this.selectedItem = this.rewardRequest?.itemId ?? itemId;
     this.openItemPanel('supply');
+  }
+
+  private openQuickReward(itemId: ItemId): void {
+    this.selectedItem = this.rewardRequest?.itemId ?? itemId;
+    this.openItemPanel('reward');
+    void this.requestReward(this.selectedItem === 'commute-horn' ? 'rewarded-ad' : 'share-participation');
   }
 
   private openItemPanel(panel: ItemPanel): void {
     if (this.disposed || this.rewardStatus === 'watching') return;
     const previousPanel = this.itemPanel;
     const storageReady = this.persistProgress();
-    if (previousPanel !== 'welcome' && this.itemPanel === 'welcome') panel = 'welcome';
+    if (panel !== 'reward' && previousPanel !== 'welcome' && this.itemPanel === 'welcome') panel = 'welcome';
     // 保存失败的有效奖励保留原请求，不能被新一轮领取覆盖。
-    this.itemPanel = this.rewardStatus === 'save-error' ? 'supply'
+    this.itemPanel = this.rewardStatus === 'save-error' ? (panel === 'reward' ? 'reward' : 'supply')
       : this.saveValue.items.welcomeGiftStatus === 'eligible' ? 'welcome' : panel;
     if (!this.rewardRequest) {
       this.rewardStatus = 'idle';
@@ -1282,6 +1290,7 @@ export class GameRuntime {
     }
     if (this.rewardStatus !== 'save-error') {
       this.rewardRequest = undefined;
+      this.rewardResultRunId = undefined;
       this.rewardStatus = 'idle';
       this.share.cancel();
     }
@@ -1334,7 +1343,7 @@ export class GameRuntime {
     if (this.saveValue.items.welcomeGiftStatus === 'eligible') {
       const granted = this.rewards.welcome();
       this.itemPanel = 'welcome';
-      this.itemMessage = granted ? '两种道具已放入背包' : '暂时无法保存，请重试领取';
+      this.itemMessage = granted ? '两种道具已领取，进入游戏后点击使用' : '暂时无法保存，请重试领取';
       return granted;
     }
     return true;
@@ -1346,8 +1355,8 @@ export class GameRuntime {
   queueItem(id: ItemId): boolean {
     const state = this.state;
     if (!state || this.screenValue !== 'game' || state.phase === 'result' || this.paused) return false;
-    // 空库存点击用于领取，不受当前使用阶段或本局使用次数限制；开面板同时清空待使用操作并暂停。
-    if (this.saveValue.items.inventory[id] <= 0) { this.openSupply(id); return false; }
+    // 空库存直接领取，不受使用阶段或本局次数限制；调起外部界面前暂停并清空待使用操作。
+    if (this.saveValue.items.inventory[id] <= 0) { this.openQuickReward(id); return false; }
     if (this.queuedItem) return false;
     if (this.usedItems[id] >= 1) { this.notice(this.currentLevel.id === ENDLESS_LEVEL_ID ? '本场已经使用过该道具' : '本局已经使用过该道具'); return false; }
     if (!itemPhaseAllowed(state, id)) { this.notice(ITEMS[id].hint); return false; }
@@ -1379,17 +1388,23 @@ export class GameRuntime {
   }
 
   async requestReward(source: RewardSource): Promise<void> {
-    if (this.disposed || this.itemPanel !== 'supply' || this.rewardRequest) return;
-    if (source === 'rewarded-ad' && !this.rewardedAd.available) { this.notice(this.rewardedAd.unavailableReason); this.render(); return; }
+    if (this.disposed || (this.itemPanel !== 'supply' && this.itemPanel !== 'reward') || this.rewardRequest) return;
+    const direct = this.itemPanel === 'reward';
+    const fromFailure = direct && this.screenValue === 'result' && this.state?.outcome === 'failure';
+    if (fromFailure && this.claimedResultRewards.has(this.selectedItem)) return;
+    if (direct && source !== (this.selectedItem === 'commute-horn' ? 'rewarded-ad' : 'share-participation')) return;
+    if (source === 'rewarded-ad' && !this.rewardedAd.available) { this.notice(direct ? '暂无可用广告，请稍后重试' : this.rewardedAd.unavailableReason); this.render(); return; }
     if (source === 'share-participation' && !this.share.available) { this.notice('当前环境不支持分享'); this.render(); return; }
     if (!this.persistProgress()) {
       this.notice('暂时无法读取或保存存档，请稍后重试领取'); this.render(); return;
     }
-    if (this.itemPanel !== 'supply') { this.render(); return; }
+    if (direct) this.itemPanel = 'reward';
+    if (this.itemPanel !== 'supply' && this.itemPanel !== 'reward') { this.render(); return; }
     const request: RewardRequest = { id: this.newRequestId(), itemId: this.selectedItem, source };
     this.rewardRequest = request;
+    this.rewardResultRunId = fromFailure ? this.runId : undefined;
     this.rewardStatus = source === 'rewarded-ad' ? 'watching' : 'sharing';
-    this.itemMessage = source === 'rewarded-ad' ? '完整观看后领取，先放入背包' : '分享返回后可领取，若未到账请点领取';
+    this.itemMessage = source === 'rewarded-ad' ? '完整观看后领取，游戏中手动使用' : '分享返回后可领取，若未到账请点领取';
     this.input.reset(); this.syncLoopPause();
     this.rewardMuted = true;
     this.audio.setSettings({ soundEnabled: false, musicEnabled: false });
@@ -1406,7 +1421,7 @@ export class GameRuntime {
     if (result === 'completed') this.saveReward();
     else {
       this.rewardStatus = 'idle'; this.rewardRequest = undefined;
-      this.itemMessage = result === 'cancelled' ? '视频未完整观看，未领取道具' : '暂无可用广告，可选择分享领取';
+      this.itemMessage = result === 'cancelled' ? '视频未完整观看，未领取道具' : direct ? '暂无可用广告，请稍后重试' : '暂无可用广告，可选择分享领取';
       this.render();
     }
   }
@@ -1421,11 +1436,16 @@ export class GameRuntime {
   private saveReward(): boolean {
     const request = this.rewardRequest;
     if (!request || this.disposed) return false;
+    const direct = this.itemPanel === 'reward';
     this.rewardStatus = 'saving';
     const saved = this.ensureStorageReady() && this.rewards.grant(request);
+    // 奖励落盘后才隐藏本次失败结算的对应入口；旧局延迟保存不能影响新一局。
+    if (saved && this.rewardResultRunId === this.runId && this.screenValue === 'result' && this.state?.outcome === 'failure') {
+      this.claimedResultRewards.add(request.itemId);
+    }
     this.rewardStatus = saved ? 'granted' : 'save-error';
-    this.itemMessage = saved ? `${ITEMS[request.itemId].name} ×1 已放入背包` : '奖励已确认，保存失败，请重试保存';
-    this.itemPanel = 'supply';
+    this.itemMessage = saved ? `${ITEMS[request.itemId].name} ×1 已领取，游戏中手动使用` : '奖励已确认，保存失败，请重试保存';
+    this.itemPanel = direct ? 'reward' : 'supply';
     this.syncLoopPause(); this.render();
     return saved;
   }
@@ -1439,24 +1459,23 @@ export class GameRuntime {
 
   private handleItemAction(action: string): void {
     if (action.startsWith('use:')) { const id = action.slice(4); if (isItemId(id)) this.queueItem(id); return; }
-    if (action === 'close') {
-      const returnToInventory = this.itemPanel === 'supply' && this.supplyFromInventory && this.rewardStatus !== 'save-error';
-      if (this.closeItemPanel() && returnToInventory) this.openInventory();
-      return;
-    }
+    if (action === 'close') { this.closeItemPanel(); return; }
     if (this.rewardStatus === 'watching' || this.rewardStatus === 'saving') return;
     if (action === 'claim-share') { this.claimShare(); return; }
     if (action === 'save-retry') { if (this.rewardStatus === 'save-error') this.saveReward(); return; }
     if (action === 'welcome-retry') {
-      this.itemMessage = this.rewards.welcome() ? '两种道具已放入背包' : '暂时无法保存，请重试领取'; return;
+      this.itemMessage = this.rewards.welcome() ? '两种道具已领取，进入游戏后点击使用' : '暂时无法保存，请重试领取'; return;
     }
-    if (action === 'inventory') { this.openInventory(); return; }
     if (action === 'supply') { this.openSupply(); return; }
+    if (action === 'reward-retry' && this.itemPanel === 'reward') {
+      void this.requestReward(this.selectedItem === 'commute-horn' ? 'rewarded-ad' : 'share-participation'); return;
+    }
     if (action === 'result-share-ticket' || action === 'result-ad-horn') {
       if (this.itemPanel || this.screenValue !== 'result' || this.state?.outcome !== 'failure') return;
       const shareTicket = action === 'result-share-ticket';
-      this.openSupply(shareTicket ? 'delay-ticket' : 'commute-horn');
-      void this.requestReward(shareTicket ? 'share-participation' : 'rewarded-ad');
+      const itemId = shareTicket ? 'delay-ticket' : 'commute-horn';
+      if (this.claimedResultRewards.has(itemId)) return;
+      this.openQuickReward(itemId);
       return;
     }
     if (this.rewardRequest) return;

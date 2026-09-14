@@ -1,4 +1,4 @@
-import type { Rect, Vec2 } from '../core/types.ts';
+import type { ItemId, Rect, Vec2 } from '../core/types.ts';
 import { clamp } from '../core/vector.ts';
 
 export interface Canvas2DContextLike {
@@ -356,8 +356,8 @@ export function createRenderLayout(
   };
 }
 
-/** 失败结算的四个操作共用布局；窄屏按重试、路线／分享、广告分成两行。 */
-export function failedResultLayout(layout: RenderLayout) {
+/** 失败结算只排列可见操作；每行居中，窄屏最多两列。 */
+export function failedResultLayout(layout: RenderLayout, claimedRewards: readonly ItemId[] = []) {
   const content = layout.viewport.contentRect;
   const height = Math.min(layout.orientation === 'landscape' ? 340 : 450, content.height - 24);
   const panel: Rect = {
@@ -368,29 +368,28 @@ export function failedResultLayout(layout: RenderLayout) {
   };
   const gap = 10;
   const innerWidth = panel.width - 36;
-  const stacked = panel.width < 520;
+  const buttons = ['retry', 'route'];
+  if (!claimedRewards.includes('delay-ticket')) buttons.push('shareTicket');
+  if (!claimedRewards.includes('commute-horn')) buttons.push('adHorn');
+  const columns = panel.width < 520 ? Math.min(2, buttons.length) : buttons.length;
+  const rows = Math.ceil(buttons.length / columns);
   const buttonHeight = 44;
-  const y = panel.y + panel.height - 30 - (stacked ? buttonHeight * 2 + gap : buttonHeight);
-  const buttonWidth = stacked
-    ? (innerWidth - gap) / 2
-    : Math.min(112, (innerWidth - gap * 3) / 4);
-  const startX = stacked
-    ? panel.x + 18
-    : panel.x + (panel.width - buttonWidth * 4 - gap * 3) / 2;
-  const retry: Rect = { x: startX, y, width: buttonWidth, height: buttonHeight };
-  const route: Rect = { ...retry, x: retry.x + buttonWidth + gap };
-  const rewardWidth = buttonWidth;
-  const rewardStartX = stacked
-    ? retry.x
-    : route.x + buttonWidth + gap;
-  const shareTicket: Rect = {
-    x: rewardStartX,
-    y: stacked ? y + buttonHeight + gap : y,
-    width: rewardWidth,
-    height: buttonHeight,
+  const y = panel.y + panel.height - 30 - rows * buttonHeight - (rows - 1) * gap;
+  const availableWidth = (innerWidth - gap * (columns - 1)) / columns;
+  const buttonWidth = panel.width < 520 ? availableWidth : Math.min(112, availableWidth);
+  const buttonRect = (index: number): Rect => {
+    const row = Math.floor(index / columns);
+    const rowCount = Math.min(columns, buttons.length - row * columns);
+    const startX = panel.x + (panel.width - rowCount * buttonWidth - (rowCount - 1) * gap) / 2;
+    return { x: startX + (index % columns) * (buttonWidth + gap), y: y + row * (buttonHeight + gap), width: buttonWidth, height: buttonHeight };
   };
-  const adHorn: Rect = { ...shareTicket, x: shareTicket.x + rewardWidth + gap };
-  return { panel, retry, route, shareTicket, adHorn };
+  return {
+    panel,
+    retry: buttonRect(0),
+    route: buttonRect(1),
+    shareTicket: buttons.includes('shareTicket') ? buttonRect(buttons.indexOf('shareTicket')) : undefined,
+    adHorn: buttons.includes('adHorn') ? buttonRect(buttons.indexOf('adHorn')) : undefined,
+  };
 }
 
 /**
@@ -498,6 +497,24 @@ export function menuButtonRect(viewport: ViewportMetrics, index: number, count =
     y: top + row * (height + gap),
     width,
     height,
+  };
+}
+
+/** 首页标题和四个菜单整体居中，底部留出说明文字的空间。 */
+export function homePageLayout(viewport: ViewportMetrics) {
+  const content = viewport.contentRect;
+  const buttons = Array.from({ length: 4 }, (_, index) => menuButtonRect(viewport, index, 4));
+  const originalTop = content.y + 26;
+  const lastButton = buttons[buttons.length - 1];
+  const groupHeight = lastButton.y + lastButton.height - originalTop;
+  const availableTop = content.y + 24;
+  const availableBottom = content.y + content.height - 56;
+  const offsetY = Math.max(0, availableTop + (availableBottom - availableTop - groupHeight) / 2 - originalTop);
+  const centerX = content.x + content.width / 2;
+  return {
+    title: { x: centerX, y: content.y + 42 + offsetY },
+    subtitle: { x: centerX, y: content.y + 70 + offsetY },
+    buttons: buttons.map(rect => ({ ...rect, y: rect.y + offsetY })),
   };
 }
 

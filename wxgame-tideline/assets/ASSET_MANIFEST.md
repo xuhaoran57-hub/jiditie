@@ -16,7 +16,7 @@
 | `generated/tideline-passenger-atlas.png` | PNG 六类 NPC 四帧高细节运行时图集 | `scripts/compose-passenger-atlas.py` | 由六张独立四帧 PNG 合成为 256×384 六行图集；运行时优先加载，避免 SVG 解码差异 | 1.0.0 | 项目自有；随最终项目许可证 | 是，统一 RGBA、透明通道和帧基线 | 初检通过；发布前需第二人复核 | 行顺序：普通、快步、慢行、行李、手机、同行组 |
 | `generated/tideline-player-sprite.svg` | SVG Q 版玩家帧图集 | 项目内手工 SVG | `VISUAL_SPEC.md`；四帧待机/行走/疏导动作，无外部参考图 | 0.1.0 | 项目自有；随最终项目许可证 | 是，人工绘制 | 初检通过；发布前需第二人复核 | 玩家 Sprite，微信图片解码失败时几何回退 |
 | `generated/tideline-sprite.svg` | SVG 矢量精灵 | 项目内手工 SVG | `VISUAL_SPEC.md`；抽象几何，无外部参考图 | 0.1.0 | 项目自有；随最终项目许可证 | 是，人工绘制 | 初检通过；发布前需第二人复核 | 玩家、6 类乘客、站台徽章、按钮图标 |
-| `audio/tideline-loop.wav` | PCM WAV 轻松欢快循环 BGM | `scripts/generate-audio.mjs` | G 大调跳动短旋律、分解和弦、三角波低音和轻鼓点，无采样 | 1.4.0 | 项目自有；随最终项目许可证 | 否 | 初检通过；真机试听待 M7 | 8s，22050Hz，单声道，循环播放 |
+| `audio/tideline-loop.wav` | PCM WAV 电钢琴循环 BGM | `scripts/generate-audio.mjs` + `scripts/compose-bgm.mjs` | 原创 D 大调八小节问答旋律，104 BPM；电钢琴、指弹贝斯、轻鼓组与轻微摇摆节奏；和弦九音／十三音配色、循环混响，无采样 | 2.0.0 | 项目自有；随最终项目许可证 | 否 | 格式及波形检查；真机试听待复核 | 18.46s，22050Hz，16-bit，单声道，首尾尾音衔接 |
 | `audio/ui-guide.wav` | PCM WAV UI 音效 | `scripts/generate-audio.mjs` | 确定性短音调，无采样 | 0.1.0 | 项目自有；随最终项目许可证 | 否 | 初检通过；真机试听待 M7 | 疏导按钮 |
 | `audio/ui-success.wav` | PCM WAV 结算音效 | `scripts/generate-audio.mjs` | 确定性三音符，无采样 | 0.1.0 | 项目自有；随最终项目许可证 | 否 | 初检通过；真机试听待 M7 | 成功结算 |
 | `audio/ui-failure.wav` | PCM WAV 结算音效 | `scripts/generate-audio.mjs` | 确定性低音下行，无采样 | 0.1.0 | 项目自有；随最终项目许可证 | 否 | 初检通过；真机试听待 M7 | 失败结算 |

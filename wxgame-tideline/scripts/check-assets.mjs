@@ -103,7 +103,7 @@ try {
 for (const relative of requiredFiles.filter((file) => file.endsWith('.wav'))) {
   try {
     const buffer = readFileSync(resolve(assetsDir, relative));
-    const maxBytes = relative === 'audio/tideline-loop.wav' ? 512 * 1024 : 256 * 1024;
+    const maxBytes = relative === 'audio/tideline-loop.wav' ? 1024 * 1024 : 256 * 1024;
     const channels = buffer.readUInt16LE(22);
     const sampleRate = buffer.readUInt32LE(24);
     const bits = buffer.readUInt16LE(34);

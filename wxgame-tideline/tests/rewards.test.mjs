@@ -6,12 +6,11 @@ import { GameRuntime } from '../src/runtime/game-runtime.ts';
 import { DEFAULT_SAVE_KEY } from '../src/platform/wx/storage.ts';
 import { emptySave, serializeSave } from '../src/core/save-schema.ts';
 
-test('首次进入各发一件并展示背包，关闭与重启不重复发放', () => {
+test('首次进入各发一件并提示局内使用，关闭与重启不重复发放', () => {
   const h = createHarness();
   assert.equal(h.runtime.getItemUi().panel, 'welcome');
   assert.deepEqual(h.runtime.saveData.items.inventory, { 'commute-horn': 1, 'delay-ticket': 1 });
-  h.tap('inventory'); assert.equal(h.runtime.getItemUi().panel, 'inventory');
-  h.tap('close'); h.runtime.destroy();
+  h.tap('close'); assert.equal(h.runtime.getItemUi().panel, null); h.runtime.destroy();
   const reloaded = new GameRuntime(h.wx);
   assert.deepEqual(reloaded.saveData.items.inventory, { 'commute-horn': 1, 'delay-ticket': 1 });
   assert.equal(reloaded.getItemUi().panel, null); reloaded.destroy();
@@ -169,13 +168,13 @@ test('重读保留历史库存并合并临时成绩，领奖保存失败后可�
 test('确认恢复后存档缺失才补发首礼，反复打开与重启只发一次', (t) => {
   const h = createHarness({ fresh: false }); h.runtime.destroy(); h.storage.clear(); h.failReads(true);
   const runtime = new GameRuntime(h.wx); t.after(() => runtime.destroy());
-  runtime.openInventory();
+  runtime.openSupply();
   assert.equal(runtime.saveData.items.welcomeGiftStatus, 'ineligible');
   assert.equal(runtime.saveData.items.inventory['delay-ticket'], 0);
-  h.failReads(false); runtime.openInventory();
+  h.failReads(false); runtime.openSupply();
   assert.equal(runtime.getItemUi().panel, 'welcome');
   assert.deepEqual(runtime.saveData.items.inventory, { 'commute-horn': 1, 'delay-ticket': 1 });
-  runtime.openInventory(); runtime.openInventory();
+  runtime.openSupply(); runtime.openSupply();
   const reloaded = new GameRuntime(h.wx); t.after(() => reloaded.destroy());
   assert.deepEqual(reloaded.saveData.items.inventory, { 'commute-horn': 1, 'delay-ticket': 1 });
 });
@@ -216,9 +215,9 @@ test('重读后的未完成使用在写入恢复后补偿一次', (t) => {
   save.items.pendingUse = { requestId: 'interrupted-use', itemId: 'delay-ticket', runId: 'old-run' };
   h.storage.set(DEFAULT_SAVE_KEY, serializeSave(save)); h.failReads(true);
   const runtime = new GameRuntime(h.wx); t.after(() => runtime.destroy());
-  h.failReads(false); h.failWrites(true); runtime.openInventory();
+  h.failReads(false); h.failWrites(true); runtime.openSupply();
   assert.equal(runtime.saveData.items.inventory['delay-ticket'], 0);
-  h.failWrites(false); runtime.openInventory(); runtime.openInventory();
+  h.failWrites(false); runtime.openSupply(); runtime.openSupply();
   assert.equal(runtime.saveData.items.inventory['delay-ticket'], 1);
   assert.equal(runtime.saveData.items.pendingUse, null);
   const reloaded = new GameRuntime(h.wx); t.after(() => reloaded.destroy());

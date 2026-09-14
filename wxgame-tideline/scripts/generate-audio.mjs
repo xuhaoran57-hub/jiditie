@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { renderBgm } from './compose-bgm.mjs';
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputDir = resolve(projectDir, 'assets', 'audio');
@@ -64,77 +65,9 @@ function note(time, start, end, from, to, shape = sine) {
   return shape(frequency, time - start);
 }
 
-function midiFrequency(noteNumber) {
-  return 440 * (2 ** ((noteNumber - 69) / 12));
-}
-
-function sequenceTone(time, noteNumbers, step, amplitude, shape = triangle) {
-  const cycle = noteNumbers.length * step;
-  const local = ((time % cycle) + cycle) % cycle;
-  const index = Math.min(noteNumbers.length - 1, Math.floor(local / step));
-  const offset = local - index * step;
-  const duration = step * 0.86;
-  const noteNumber = noteNumbers[index];
-  if (!Number.isFinite(noteNumber)) return 0;
-  const frequency = midiFrequency(noteNumber);
-  return envelope(offset, duration, 0.012, Math.min(0.1, step * 0.32))
-    * amplitude
-    * shape(frequency, offset);
-}
-
-function pulse(time, interval, frequency, amplitude) {
-  const offset = ((time % interval) + interval) % interval;
-  const duration = Math.min(0.14, interval * 0.42);
-  return offset < duration
-    ? envelope(offset, duration, 0.002, Math.min(0.06, duration * 0.55))
-      * amplitude
-      * sine(frequency, offset)
-    : 0;
-}
-
 mkdirSync(outputDir, { recursive: true });
 
-writeWav('tideline-loop.wav', render(8, (time) => {
-  // 120 BPM、G 大调的四小节进行；跳动短句、分解和弦、低音和轻鼓点形成
-  // 与上一版不同的明亮律动，并在 8 秒边界回到同一拍点实现无缝循环。
-  const melody = sequenceTone(
-    time,
-    [83, 86, 91, 86, 83, 81, 83, 86,
-      81, 78, 81, 86, 84, 81, 78, 81,
-      83, 88, 91, 88, 86, 83, 81, 83,
-      79, 84, 88, 86, 84, 79, 81, 83],
-    0.25,
-    0.14,
-    (frequency, offset) => 0.62 * triangle(frequency, offset)
-      + 0.3 * sine(frequency * 2, offset)
-      + 0.08 * sine(frequency * 4, offset),
-  );
-  const bass = sequenceTone(
-    time,
-    [43, 43, 43, 43, 38, 38, 38, 38, 40, 40, 40, 40, 36, 36, 36, 36],
-    0.5,
-    0.1,
-    (frequency, offset) => 0.72 * triangle(frequency, offset) + 0.28 * sine(frequency * 2, offset),
-  );
-  const chords = [
-    [196, 247, 294],
-    [147, 185, 220],
-    [165, 196, 247],
-    [131, 165, 196],
-  ];
-  const chordIndex = Math.min(chords.length - 1, Math.floor(time / 2));
-  const chordLocal = time - chordIndex * 2;
-  const chordFade = envelope(chordLocal, 2, 0.1, 0.1);
-  const pad = chordFade * 0.024 * (
-    sine(chords[chordIndex][0], time)
-    + 0.68 * sine(chords[chordIndex][1], time)
-    + 0.48 * sine(chords[chordIndex][2], time)
-  );
-  const beat = pulse(time, 0.5, 104, 0.036)
-    + pulse(time - 0.25, 0.5, 208, 0.017)
-    + pulse(time - 0.375, 1, 312, 0.008);
-  return 0.94 * (melody + bass + pad + beat);
-}));
+writeWav('tideline-loop.wav', renderBgm(SAMPLE_RATE));
 
 writeWav('ui-guide.wav', render(0.16, (time, duration) => {
   return envelope(time, duration) * 0.3 * note(time, 0, duration, 900, 520);
