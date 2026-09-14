@@ -246,6 +246,8 @@ export class GameRuntime {
   private readonly rewardedAd: WxRewardedAdAdapter;
   private readonly share: WxShareAdapter;
   private storageWritable = true;
+  private recoverySettings: Partial<SaveSettings> = {};
+  private recoveryAppearanceId?: string;
   private itemPanel: ItemPanel = null;
   private supplyFromInventory = false;
   private selectedItem: ItemId = 'commute-horn';
@@ -653,6 +655,7 @@ export class GameRuntime {
     if (this.screenValue !== 'appearance') return false;
     if (!isAppearanceUnlocked(this.saveValue, appearanceId)) return false;
     this.saveValue = setAppearance(this.saveValue, appearanceId);
+    if (!this.storageWritable) this.recoveryAppearanceId = appearanceId;
     this.persistProgress();
     this.render();
     return true;
@@ -663,6 +666,7 @@ export class GameRuntime {
     else if (setting === 'music') this.setMusicEnabled(!this.saveValue.settings.musicEnabled);
     else {
       this.saveValue = migrateSave({ ...this.saveValue, settings: { ...this.saveValue.settings, vibrationEnabled: !this.saveValue.settings.vibrationEnabled } });
+      if (!this.storageWritable) this.recoverySettings.vibrationEnabled = this.saveValue.settings.vibrationEnabled;
       this.persistProgress();
       this.render();
     }
@@ -717,6 +721,7 @@ export class GameRuntime {
   setSoundEnabled(enabled: boolean): void {
     this.audio.setSoundEnabled(enabled);
     this.saveValue = migrateSave({ ...this.saveValue, settings: { ...this.saveValue.settings, soundEnabled: enabled } });
+    if (!this.storageWritable) this.recoverySettings.soundEnabled = enabled;
     this.persistProgress();
   }
 
@@ -724,6 +729,7 @@ export class GameRuntime {
     this.audio.setMusicEnabled(enabled);
     if (enabled) this.musicStarted = false;
     this.saveValue = migrateSave({ ...this.saveValue, settings: { ...this.saveValue.settings, musicEnabled: enabled } });
+    if (!this.storageWritable) this.recoverySettings.musicEnabled = enabled;
     this.persistProgress();
   }
 
@@ -1057,6 +1063,7 @@ export class GameRuntime {
   private handleLifecycleResume(): void {
     this.lifecyclePaused = false;
     this.lastFrameTimestamp = undefined;
+    if (!this.storageWritable) this.persistProgress();
     const requestId = this.share.onShow();
     if (requestId && this.rewardRequest?.id === requestId) this.claimShare();
     this.syncLoopPause();
@@ -1251,10 +1258,16 @@ export class GameRuntime {
 
   private openItemPanel(panel: ItemPanel): void {
     if (this.disposed || this.rewardStatus === 'watching') return;
+    const previousPanel = this.itemPanel;
+    const storageReady = this.persistProgress();
+    if (previousPanel !== 'welcome' && this.itemPanel === 'welcome') panel = 'welcome';
     // 保存失败的有效奖励保留原请求，不能被新一轮领取覆盖。
     this.itemPanel = this.rewardStatus === 'save-error' ? 'supply'
       : this.saveValue.items.welcomeGiftStatus === 'eligible' ? 'welcome' : panel;
-    if (!this.rewardRequest) { this.rewardStatus = 'idle'; this.itemMessage = ''; }
+    if (!this.rewardRequest) {
+      this.rewardStatus = 'idle';
+      if (this.itemPanel !== 'welcome') this.itemMessage = storageReady ? '' : '暂时无法读取或保存存档，请稍后重试';
+    }
     this.queuedItem = undefined;
     this.input.reset();
     this.syncLoopPause();
@@ -1283,7 +1296,51 @@ export class GameRuntime {
   }
 
   private newRequestId(): string { return `${this.now()}:${this.instanceId}:${++this.requestSequence}`; }
-  private persistProgress(): boolean { return this.storageWritable && this.storage.save(this.saveValue); }
+  private ensureStorageReady(): boolean {
+    if (!this.storageWritable) {
+      const loaded = this.storage.loadWithStatus();
+      // 必须重新读到可处理的存档后才解除保护，不能直接把启动时的空回退写回。
+      if (loaded.status === 'unsupported' || loaded.status === 'unavailable') return false;
+      const session = this.saveValue;
+      const next = this.normalizeSave(loaded.save);
+      // 读取失败期间只能积累临时进度；库存、首礼及奖励去重记录以原存档为准。
+      next.unlockedLevelIds = [...new Set([...next.unlockedLevelIds, ...session.unlockedLevelIds])];
+      next.achievements = [...new Set([...next.achievements, ...session.achievements])];
+      next.endlessUnlocked ||= session.endlessUnlocked;
+      for (const key of ['bestScores', 'bestStars'] as const) {
+        for (const [id, value] of Object.entries(session[key])) next[key][id] = Math.max(next[key][id] ?? 0, value);
+        for (const [id, value] of Object.entries(session.unassisted[key])) {
+          next.unassisted[key][id] = Math.max(next.unassisted[key][id] ?? 0, value);
+        }
+      }
+      for (const key of ['endlessBestWave', 'endlessBestScore'] as const) {
+        next[key] = Math.max(next[key], session[key]);
+        next.unassisted[key] = Math.max(next.unassisted[key], session.unassisted[key]);
+      }
+      for (const key of ['plays', 'clears', 'totalGuides'] as const) next.stats[key] += session.stats[key];
+      next.settings = { ...next.settings, ...this.recoverySettings };
+      next.appearanceId = this.recoveryAppearanceId ?? next.appearanceId;
+      if (loaded.status === 'missing') next.items.welcomeGiftStatus = 'eligible';
+      this.saveValue = this.normalizeSave(next);
+      this.storageWritable = true;
+      this.recoverySettings = {};
+      this.recoveryAppearanceId = undefined;
+      if (!this.rewardMuted) {
+        this.audio.setSettings(this.saveValue.settings);
+        this.musicStarted = false;
+      }
+    }
+    if (this.saveValue.items.pendingUse && !this.pendingUseApplied && !this.rewards.recoverUse()) return false;
+    if (this.saveValue.items.welcomeGiftStatus === 'eligible') {
+      const granted = this.rewards.welcome();
+      this.itemPanel = 'welcome';
+      this.itemMessage = granted ? '两种道具已放入背包' : '暂时无法保存，请重试领取';
+      return granted;
+    }
+    return true;
+  }
+
+  private persistProgress(): boolean { return this.ensureStorageReady() && this.storage.save(this.saveValue); }
   private notice(message: string): void { this.itemMessage = message; this.messageUntil = this.now() + 2400; }
 
   queueItem(id: ItemId): boolean {
@@ -1325,6 +1382,10 @@ export class GameRuntime {
     if (this.disposed || this.itemPanel !== 'supply' || this.rewardRequest) return;
     if (source === 'rewarded-ad' && !this.rewardedAd.available) { this.notice(this.rewardedAd.unavailableReason); this.render(); return; }
     if (source === 'share-participation' && !this.share.available) { this.notice('当前环境不支持分享'); this.render(); return; }
+    if (!this.persistProgress()) {
+      this.notice('暂时无法读取或保存存档，请稍后重试领取'); this.render(); return;
+    }
+    if (this.itemPanel !== 'supply') { this.render(); return; }
     const request: RewardRequest = { id: this.newRequestId(), itemId: this.selectedItem, source };
     this.rewardRequest = request;
     this.rewardStatus = source === 'rewarded-ad' ? 'watching' : 'sharing';
@@ -1361,7 +1422,7 @@ export class GameRuntime {
     const request = this.rewardRequest;
     if (!request || this.disposed) return false;
     this.rewardStatus = 'saving';
-    const saved = this.rewards.grant(request);
+    const saved = this.ensureStorageReady() && this.rewards.grant(request);
     this.rewardStatus = saved ? 'granted' : 'save-error';
     this.itemMessage = saved ? `${ITEMS[request.itemId].name} ×1 已放入背包` : '奖励已确认，保存失败，请重试保存';
     this.itemPanel = 'supply';

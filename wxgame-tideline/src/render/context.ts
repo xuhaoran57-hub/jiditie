@@ -371,12 +371,20 @@ export function failedResultLayout(layout: RenderLayout) {
   const stacked = panel.width < 520;
   const buttonHeight = 44;
   const y = panel.y + panel.height - 30 - (stacked ? buttonHeight * 2 + gap : buttonHeight);
-  const navWidth = stacked ? (innerWidth - gap) / 2 : Math.min(84, (innerWidth - gap * 3) * 0.18);
-  const retry: Rect = { x: panel.x + 18, y, width: navWidth, height: buttonHeight };
-  const route: Rect = { ...retry, x: retry.x + navWidth + gap };
-  const rewardWidth = stacked ? navWidth : (innerWidth - navWidth * 2 - gap * 3) / 2;
+  const buttonWidth = stacked
+    ? (innerWidth - gap) / 2
+    : Math.min(112, (innerWidth - gap * 3) / 4);
+  const startX = stacked
+    ? panel.x + 18
+    : panel.x + (panel.width - buttonWidth * 4 - gap * 3) / 2;
+  const retry: Rect = { x: startX, y, width: buttonWidth, height: buttonHeight };
+  const route: Rect = { ...retry, x: retry.x + buttonWidth + gap };
+  const rewardWidth = buttonWidth;
+  const rewardStartX = stacked
+    ? retry.x
+    : route.x + buttonWidth + gap;
   const shareTicket: Rect = {
-    x: stacked ? retry.x : route.x + navWidth + gap,
+    x: rewardStartX,
     y: stacked ? y + buttonHeight + gap : y,
     width: rewardWidth,
     height: buttonHeight,

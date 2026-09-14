@@ -31,9 +31,12 @@ export function itemUiLayout(layout: RenderLayout) {
   const cards = ITEM_IDS.map((id, i) => ({ id, rect: { x: panel.x + 18 + i * (cardWidth + gap), y: panel.y + 66, width: cardWidth, height: cardHeight } }));
   const rowY = panel.y + h - 112;
   const half = (w - 46) / 2;
-  const primary = { x: panel.x + 18, y: rowY, width: half, height: 44 };
-  const secondary = { ...primary, x: primary.x + half + 10 };
-  const single = { ...primary, width: w - 36 };
+  // 横屏面板较宽时，奖励按钮不再拉伸到整行，保持紧凑且易于区分。
+  const rewardWidth = Math.min(180, half);
+  const rewardStartX = panel.x + (w - rewardWidth * 2 - gap) / 2;
+  const primary = { x: rewardStartX, y: rowY + 4, width: rewardWidth, height: 36 };
+  const secondary = { ...primary, x: primary.x + rewardWidth + gap };
+  const single = { x: panel.x + 18, y: rowY, width: w - 36, height: 44 };
   const back = { x: panel.x + 18, y: panel.y + h - 58, width: w - 36, height: 44 };
   const g = layout.guideButtonRect;
   const quick = ITEM_IDS.map((id, i) => ({ id, rect: { x: c.x + c.width - 132 + i * 58, y: g.y - 64, width: 52, height: 54 } }));

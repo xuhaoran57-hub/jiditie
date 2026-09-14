@@ -189,6 +189,13 @@ test('失败页四个按钮适配横竖屏和安全区，重试与路线命中�
     const layout = h.runtime.renderer.context.layout; const c = layout.viewport.contentRect;
     const actions = failedResultLayout(layout);
     const rects = [actions.retry, actions.route, actions.shareTicket, actions.adHorn];
+    if (layout.orientation === 'landscape' && actions.panel.width >= 520) {
+      assert.ok(actions.shareTicket.width <= 112);
+      assert.ok(actions.adHorn.width <= 112);
+      assert.equal(actions.retry.width, actions.route.width);
+      assert.equal(actions.route.width, actions.shareTicket.width);
+      assert.equal(actions.shareTicket.width, actions.adHorn.width);
+    }
     const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
     for (const r of rects) {
       assert.ok(r.x >= c.x && r.y >= c.y && r.x + r.width <= c.x + c.width && r.y + r.height <= c.y + c.height);
@@ -237,6 +244,11 @@ test('横竖屏与安全区中的道具、弹窗命中区域有效且不重叠',
     const h = createHarness({ width, height, safeArea }); h.tap('close');
     const layout = h.runtime.renderer.context.layout; const c = layout.viewport.contentRect;
     const l = itemUiLayout(layout);
+    if (layout.orientation === 'landscape') {
+      assert.ok(l.primary.width <= 180);
+      assert.equal(l.primary.height, 36);
+      assert.equal(l.secondary.height, 36);
+    }
     const inside = (r) => r.x >= c.x && r.y >= c.y && r.x + r.width <= c.x + c.width && r.y + r.height <= c.y + c.height;
     for (const r of [l.homeEntry, l.entry, l.panel, ...l.quick.map((q) => q.rect), l.primary, l.secondary, l.back]) assert.ok(inside(r), JSON.stringify({ width, height, r }));
     const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
