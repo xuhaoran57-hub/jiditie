@@ -205,7 +205,9 @@ function makeCollisionActors(state: GameState, level: LevelConfig): { actors: Co
       ...(playerOnly ? { playerOnly: true } : {}),
     });
   }
-  return { actors, passengers };
+  // actors[0] 是玩家，后续元素与 collisionPassengers 一一对应。
+  // resolveCollisions 只更新元素，不改变数组顺序。
+  return { actors, passengers: collisionPassengers };
 }
 
 export class GameSimulation {
@@ -729,7 +731,7 @@ export class GameSimulation {
       this.state.metrics.courtesyPoints -= playerCollisionCount * 0.15;
     }
 
-    const playerActor = actors.find((actor) => actor.id === 'player');
+    const playerActor = actors[0];
     if (playerActor) {
       this.state.player.position = this.constrainPlayerPosition(
         finiteVec(playerActor.position, this.state.player.position),
@@ -743,9 +745,9 @@ export class GameSimulation {
       );
       this.state.player.velocity = finiteVec(playerActor.velocity, vec());
     }
-    for (const passenger of passengers) {
-      const actor = actors.find((item) => item.id === passenger.id);
-      if (!actor) continue;
+    for (let index = 0; index < passengers.length; index += 1) {
+      const passenger = passengers[index];
+      const actor = actors[index + 1];
       passenger.position = finiteVec(actor.position, passenger.position);
       passenger.velocity = finiteVec(actor.velocity, vec());
       clampPassenger(passenger, this.level);

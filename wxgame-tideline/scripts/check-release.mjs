@@ -14,6 +14,7 @@ const DEFAULT_LIMITS = Object.freeze({
   distBytes: 1 * 1024 * 1024,
   wavBytes: 256 * 1024,
   loopWavBytes: 1024 * 1024,
+  mp3Bytes: 256 * 1024,
   svgBytes: 128 * 1024,
 });
 
@@ -23,16 +24,13 @@ const REQUIRED_FILES = [
   'project.config.json',
   'dist/runtime/index.js',
   'dist/package.json',
-  'assets/ASSET_MANIFEST.md',
   'assets/design-tokens.json',
-  'assets/generated/tideline-sprite.svg',
-  'assets/generated/tideline-player-sprite.svg',
   'assets/generated/tideline-player-sprite.png',
   'assets/generated/tideline-passenger-regular-sprite.png',
   'assets/generated/tideline-passenger-fast-sprite.png',
-  'assets/generated/tideline-passenger-atlas.svg',
+  'assets/generated/tideline-passenger-luggage-sprite.png',
   'assets/generated/tideline-passenger-atlas.png',
-  'assets/audio/tideline-loop.wav',
+  'assets/audio/tideline-loop.mp3',
   'assets/audio/ui-guide.wav',
   'assets/audio/ui-success.wav',
   'assets/audio/ui-failure.wav',
@@ -101,6 +99,19 @@ function relativePath(file) {
   return normalizePath(relative(projectDir, file));
 }
 
+// 与项目配置中使用的微信打包排除规则一致；源素材仍由资源检查负责。
+function isPackIgnored(path, rules) {
+  return rules.some((rule) => {
+    const value = normalizePath(String(rule.value ?? '')).replace(/^\.\//, '');
+    if (!value) return false;
+    if (rule.type === 'file') return path === value;
+    if (rule.type === 'folder') return path === value || path.startsWith(`${value}/`);
+    if (rule.type === 'suffix') return path.endsWith(value);
+    if (rule.type === 'prefix') return path.startsWith(value);
+    return false;
+  });
+}
+
 function readText(file) {
   try {
     return readFileSync(file, 'utf8');
@@ -131,11 +142,13 @@ function pushIssue(report, severity, code, message, strict = true) {
   report.issues.push({ severity, code, message, strict });
 }
 
-function checkRequiredFiles(report) {
+function checkRequiredFiles(report, options) {
   for (const relative of REQUIRED_FILES) {
     const file = resolve(projectDir, relative);
     if (!existsSync(file) || !lstatSync(file).isFile()) {
       pushIssue(report, 'error', 'missing-file', `缺少发布文件：${relative}`);
+    } else if (isPackIgnored(relative, options.packIgnore)) {
+      pushIssue(report, 'error', 'ignored-required-file', `packOptions.ignore 排除了运行时必需文件：${relative}`);
     }
   }
 }
@@ -231,24 +244,22 @@ function checkProjectConfig(report, options) {
     );
   }
 
-  const ignored = Array.isArray(config.packOptions?.ignore) ? config.packOptions.ignore : [];
-  for (const ignoredPath of ignored) {
-    const normalized = normalizePath(String(ignoredPath)).replace(/^\.\//, '');
-    if (RELEASE_ROOTS.some((root) => normalized === root || normalized.startsWith(`${root}/`))) {
-      pushIssue(report, 'error', 'ignored-release-root', `packOptions.ignore 排除了发布内容：${normalized}`);
-    }
+  for (const root of RELEASE_ROOTS) {
+    if (isPackIgnored(root, options.packIgnore)) pushIssue(report, 'error', 'ignored-release-root', `packOptions.ignore 排除了发布目录或入口：${root}`);
   }
 }
 
 function checkPackageSize(report, options) {
-  const releaseFiles = [];
-  for (const root of RELEASE_ROOTS) walkFiles(resolve(projectDir, root), releaseFiles);
+  const candidates = [];
+  for (const root of RELEASE_ROOTS) walkFiles(resolve(projectDir, root), candidates);
+  const releaseFiles = candidates.filter((file) => !isPackIgnored(relativePath(file), options.packIgnore));
   const packageBytes = releaseFiles.reduce((sum, file) => sum + byteSize(file), 0);
-  const distFiles = walkFiles(resolve(projectDir, 'dist'));
+  const distFiles = releaseFiles.filter((file) => relativePath(file).startsWith('dist/'));
   const distBytes = distFiles.reduce((sum, file) => sum + byteSize(file), 0);
   report.summary.releaseFiles = releaseFiles.length;
   report.summary.packageBytes = packageBytes;
   report.summary.distBytes = distBytes;
+  report.summary.excludedBytes = candidates.reduce((sum, file) => sum + byteSize(file), 0) - packageBytes;
 
   if (packageBytes > options.limits.packageBytes) {
     pushIssue(report, 'error', 'package-size', `发布内容 ${formatBytes(packageBytes)} 超过 ${formatBytes(options.limits.packageBytes)} 上限`);
@@ -270,6 +281,9 @@ function checkPackageSize(report, options) {
     }
     if (extension === '.svg' && size > options.limits.svgBytes) {
       pushIssue(report, 'error', 'svg-size', `${relativePath(file)} 为 ${formatBytes(size)}，超过 ${formatBytes(options.limits.svgBytes)} 上限`);
+    }
+    if (extension === '.mp3' && size > options.limits.mp3Bytes) {
+      pushIssue(report, 'error', 'mp3-size', `${relativePath(file)} 超过 ${formatBytes(options.limits.mp3Bytes)} 上限`);
     }
   }
 }
@@ -395,7 +409,15 @@ function checkLicenseAndMetadata(report) {
 }
 
 export function runReleaseAudit(options = {}) {
+  let packIgnore = [];
+  try {
+    const config = JSON.parse(readText(resolve(projectDir, 'project.config.json')) ?? '{}');
+    if (Array.isArray(config.packOptions?.ignore)) packIgnore = config.packOptions.ignore;
+  } catch {
+    // 配置解析错误由 checkProjectConfig 汇报，不让包体统计提前抛出异常。
+  }
   const settings = {
+    packIgnore,
     strict: Boolean(options.strict),
     production: Boolean(options.production),
     limits: { ...DEFAULT_LIMITS, ...(options.limits ?? {}) },
@@ -412,7 +434,7 @@ export function runReleaseAudit(options = {}) {
     },
   };
 
-  checkRequiredFiles(report);
+  checkRequiredFiles(report, settings);
   checkBuildOutput(report);
   checkGameEntry(report);
   checkProjectConfig(report, settings);

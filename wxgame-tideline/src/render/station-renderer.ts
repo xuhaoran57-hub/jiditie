@@ -227,6 +227,7 @@ function drawWindow(
 function drawTrain(
   context: RenderContext,
   train: Rect,
+  doors: readonly DoorConfig[],
   colors: StationColors = STATION_COLORS,
 ): void {
   const { ctx } = context;
@@ -259,19 +260,38 @@ function drawTrain(
   ctx.fillRect(x + 32, yAt(16), width - 64, h(1));
   ctx.globalAlpha = 1;
 
-  // 连续窗带：每块窗有内框、反光和竖向车体骨架。
+  // 按门洞切分车身，每段内居中排窗，避免窗户被门框截断或只剩一条窄缝。
   const windowY = yAt(26);
   const windowHeight = h(44);
-  for (let windowX = x + 14; windowX < x + width - 20; windowX += 47) {
-    drawWindow(ctx, windowX, windowY, Math.min(36, x + width - 14 - windowX), windowHeight, colors);
+  const windowStart = x + 14;
+  const windowEnd = x + width - 14;
+  const doorBays = doors.map((door) => ({
+    left: door.center.x - door.width / 2 - 10,
+    right: door.center.x + door.width / 2 + 10,
+  })).sort((first, second) => first.left - second.left);
+  const drawWindowBay = (left: number, right: number): void => {
+    const available = right - left;
+    if (available < 24) return;
+    const gap = 11;
+    const count = Math.max(1, Math.floor((available + gap) / (36 + gap)));
+    const windowWidth = Math.min(36, (available - (count - 1) * gap) / count);
+    const start = left + (available - count * windowWidth - (count - 1) * gap) / 2;
+    for (let index = 0; index < count; index += 1) {
+      const windowX = start + index * (windowWidth + gap);
+      drawWindow(ctx, windowX, windowY, windowWidth, windowHeight, colors);
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = colors.trainShellLight;
+      ctx.fillRect(windowX - 5, yAt(22), 3, height - h(48));
+      ctx.restore();
+    }
+  };
+  let bayStart = windowStart;
+  for (const bay of doorBays) {
+    drawWindowBay(bayStart, Math.min(windowEnd, bay.left));
+    bayStart = Math.max(bayStart, bay.right);
   }
-  ctx.save();
-  ctx.globalAlpha = 0.35;
-  ctx.fillStyle = colors.trainShellLight;
-  for (let ribX = x + 9; ribX < x + width; ribX += 47) {
-    ctx.fillRect(ribX, yAt(22), 3, height - h(48));
-  }
-  ctx.restore();
+  drawWindowBay(bayStart, windowEnd);
 
   // 窗下的抽象潮汐灯带和车厢下裙边。
   ctx.fillStyle = '#24556b';
@@ -401,7 +421,8 @@ function drawDoor(
   const { ctx } = context;
   const half = door.width / 2;
   const left = door.center.x - half;
-  const top = train.y + 52 * carriageVerticalScale(train.height);
+  // 门顶略高于窗带，整扇门占据独立车身区段。
+  const top = train.y + 22 * carriageVerticalScale(train.height);
   const bottom = door.center.y + 5;
   const height = bottom - top;
   const frameColor = warning
@@ -580,7 +601,17 @@ function drawEventOverlay(context: RenderContext, state: GameState, platform: Re
   }
 }
 
-export function renderStation(
+/** 与时间、车门开合和人流无关的底图，可按视口和关卡几何缓存。 */
+export function renderStationBackground(renderContext: RenderContext, level: LevelConfig): void {
+  const colors = stationColorsFor(level.carriageTheme);
+  renderContext.withWorld(() => {
+    drawBackdrop(renderContext, renderContext.layout.worldBounds, colors);
+    drawTrain(renderContext, level.trainBounds, level.doors, colors);
+    drawPlatform(renderContext, level.platformBounds, colors);
+  });
+}
+
+export function renderStationForeground(
   renderContext: RenderContext,
   level: LevelConfig,
   state: GameState,
@@ -588,11 +619,6 @@ export function renderStation(
   const { ctx } = renderContext;
   const colors = stationColorsFor(level.carriageTheme);
   renderContext.withWorld(() => {
-    const world = renderContext.layout.worldBounds;
-    drawBackdrop(renderContext, world, colors);
-    drawTrain(renderContext, level.trainBounds, colors);
-    drawPlatform(renderContext, level.platformBounds, colors);
-
     for (const door of level.doors) {
       const runtime = state.doors.find((item) => item.id === door.id);
       drawDoor(
@@ -621,4 +647,9 @@ export function renderStation(
 
     drawEventOverlay(renderContext, state, level.platformBounds);
   });
+}
+
+export function renderStation(renderContext: RenderContext, level: LevelConfig, state: GameState): void {
+  renderStationBackground(renderContext, level);
+  renderStationForeground(renderContext, level, state);
 }

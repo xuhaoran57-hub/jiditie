@@ -21,7 +21,8 @@ import {
   renderRoutePage,
   renderSettingsPage,
 } from './canvas-ui.ts';
-import { renderStation } from './station-renderer.ts';
+import { renderStationBackground, renderStationForeground } from './station-renderer.ts';
+import { StationBackgroundCache } from './station-background.ts';
 import { loadPlayerSprite, type PlayerSpriteAsset } from './player-sprite.ts';
 import { loadPassengerAtlasSprite, loadPassengerFastSprite, loadPassengerLuggageSprite, loadPassengerRegularSprite, type PassengerSpriteAsset } from './passenger-sprite.ts';
 
@@ -48,6 +49,8 @@ export interface RenderOptions {
 }
 
 export interface RenderAssetOptions {
+  /** 首页无需角色图集，由运行时在首屏后预加载。 */
+  deferLoading?: boolean;
   /** 可选的微信图片工厂；未提供或解码失败时继续使用几何角色。 */
   imageFactory?: CanvasImageFactory;
   canvasFactory?: CanvasFactory;
@@ -72,15 +75,23 @@ function worldBoundsFor(level: LevelConfig): Rect {
   return { x, y, width: right - x, height: bottom - y };
 }
 
+function spriteStatus(sprite: PlayerSpriteAsset | PassengerSpriteAsset | undefined): number {
+  return (sprite?.ready ? 1 : 0) | (sprite?.failed ? 2 : 0);
+}
+
 export class GameRenderer {
   readonly context: RenderContext;
   private readonly canvas?: CanvasLike;
-  readonly playerSprite?: PlayerSpriteAsset;
+  private readonly assets: RenderAssetOptions;
+  private assetsLoaded = false;
+  private readonly sprites: RenderAssetOptions = {};
+  get playerSprite(): PlayerSpriteAsset | undefined { return this.sprites.playerSprite; }
   private readonly appearanceSprites: PlayerAppearanceSprites;
-  readonly passengerSprite?: PassengerSpriteAsset;
-  readonly passengerFastSprite?: PassengerSpriteAsset;
-  readonly passengerLuggageSprite?: PassengerSpriteAsset;
-  readonly passengerAtlasSprite?: PassengerSpriteAsset;
+  private readonly background: StationBackgroundCache;
+  get passengerSprite(): PassengerSpriteAsset | undefined { return this.sprites.passengerSprite; }
+  get passengerFastSprite(): PassengerSpriteAsset | undefined { return this.sprites.passengerFastSprite; }
+  get passengerLuggageSprite(): PassengerSpriteAsset | undefined { return this.sprites.passengerLuggageSprite; }
+  get passengerAtlasSprite(): PassengerSpriteAsset | undefined { return this.sprites.passengerAtlasSprite; }
 
   constructor(
     context: RenderContext,
@@ -90,6 +101,26 @@ export class GameRenderer {
     this.context = context;
     this.canvas = canvas;
     this.appearanceSprites = new PlayerAppearanceSprites(assets.canvasFactory);
+    this.background = new StationBackgroundCache(assets.canvasFactory, canvas);
+    this.assets = assets;
+    if (!assets.deferLoading) this.preloadAssets();
+  }
+
+  /** 图片异步解码后，静态外观页/暂停页也需要补画一次。查询不产生分配。 */
+  get assetVersion(): number {
+    return spriteStatus(this.playerSprite)
+      | (spriteStatus(this.passengerSprite) << 2)
+      | (spriteStatus(this.passengerFastSprite) << 4)
+      | (spriteStatus(this.passengerLuggageSprite) << 6)
+      | (spriteStatus(this.passengerAtlasSprite) << 8);
+  }
+
+  destroy(): void { this.background.destroy(); }
+
+  preloadAssets(): void {
+    if (this.assetsLoaded) return;
+    this.assetsLoaded = true;
+    const assets = this.assets;
     const passengerSprite = assets.passengerSprite
       ?? loadPassengerRegularSprite(assets.imageFactory);
     const passengerFastSprite = assets.passengerFastSprite
@@ -98,22 +129,22 @@ export class GameRenderer {
       ?? loadPassengerLuggageSprite(assets.imageFactory);
     const passengerAtlasSprite = assets.passengerAtlasSprite
       ?? loadPassengerAtlasSprite(assets.imageFactory);
-    this.playerSprite = assets.playerSprite ?? loadPlayerSprite(assets.imageFactory);
+    this.sprites.playerSprite = assets.playerSprite ?? loadPlayerSprite(assets.imageFactory);
     // 某些测试桩或低版本运行时可能复用同一个 Image 对象；避免第二次设置
     // src 覆盖玩家图集，NPC 在这种情况下回退到几何绘制。
-    this.passengerSprite = passengerSprite?.image === this.playerSprite?.image
+    this.sprites.passengerSprite = passengerSprite?.image === this.playerSprite?.image
       ? undefined
       : passengerSprite;
-    this.passengerFastSprite = passengerFastSprite?.image === this.playerSprite?.image
+    this.sprites.passengerFastSprite = passengerFastSprite?.image === this.playerSprite?.image
       || passengerFastSprite?.image === this.passengerSprite?.image
       ? undefined
       : passengerFastSprite;
-    this.passengerLuggageSprite = passengerLuggageSprite?.image === this.playerSprite?.image
+    this.sprites.passengerLuggageSprite = passengerLuggageSprite?.image === this.playerSprite?.image
       || passengerLuggageSprite?.image === this.passengerSprite?.image
       || passengerLuggageSprite?.image === this.passengerFastSprite?.image
       ? undefined
       : passengerLuggageSprite;
-    this.passengerAtlasSprite = passengerAtlasSprite?.image === this.playerSprite?.image
+    this.sprites.passengerAtlasSprite = passengerAtlasSprite?.image === this.playerSprite?.image
       || passengerAtlasSprite?.image === this.passengerSprite?.image
       || passengerAtlasSprite?.image === this.passengerFastSprite?.image
       || passengerAtlasSprite?.image === this.passengerLuggageSprite?.image
@@ -144,13 +175,13 @@ export class GameRenderer {
     this.context.resize(viewport);
   }
 
-  render(state: GameState, level: LevelConfig, options: RenderOptions = {}): void {
+  render(state: GameState | null, level: LevelConfig, options: RenderOptions = {}): void {
     this.renderScene(state, level, options);
     if (options.itemUi) renderItemUi(this.context, options.screen ?? 'game', state, options.itemUi, options.paused);
   }
 
-  private renderScene(state: GameState, level: LevelConfig, options: RenderOptions): void {
-    const screen = options.screen ?? (state.phase === 'result' ? 'result' : 'game');
+  private renderScene(state: GameState | null, level: LevelConfig, options: RenderOptions): void {
+    const screen = options.screen ?? (state?.phase === 'result' ? 'result' : 'game');
     if (screen === 'home') {
       this.context.clear('#0b1627');
       renderHomePage(this.context);
@@ -162,6 +193,7 @@ export class GameRenderer {
       return;
     }
     if (screen === 'appearance') {
+      this.preloadAssets();
       this.context.clear('#0b1627');
       renderAppearancePage(this.context, options.appearanceId ?? 'default', options.unlockedAppearanceIds ?? ['default'],
         (id) => this.appearanceSprites.get(this.playerSprite, id));
@@ -197,6 +229,8 @@ export class GameRenderer {
       return;
     }
 
+    if (!state) return;
+    this.preloadAssets();
     const expectedWorld = worldBoundsFor(level);
     if (
       expectedWorld.x !== this.context.layout.worldBounds.x ||
@@ -206,8 +240,11 @@ export class GameRenderer {
     ) {
       this.context.resize(this.context.layout.viewport, expectedWorld);
     }
-    this.context.clear('#0b1627');
-    renderStation(this.context, level, state);
+    if (!this.background.draw(this.context, level)) {
+      this.context.clear('#0b1627');
+      renderStationBackground(this.context, level);
+    }
+    renderStationForeground(this.context, level, state);
     const appearanceId = options.appearanceId ?? 'default';
     renderActors(this.context, state, level, this.appearanceSprites.get(this.playerSprite, appearanceId), this.passengerSprite, this.passengerAtlasSprite, this.passengerFastSprite, appearanceId, this.passengerLuggageSprite);
     renderEffects(this.context, level, state);

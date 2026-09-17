@@ -1,6 +1,7 @@
 // 《挤上这班车》微信小游戏入口，世界观线路为虚构的“潮汐线”。
 // 运行前先执行 npm run build:wxgame，把 TypeScript 运行时输出到 dist/。
 (function bootstrapTideline() {
+  const startedAt = Date.now();
   // 部分微信开发者工具版本在 game.js 刚加载时尚未完成 JSBridge 初始化。
   // 启动阶段不读取窗口信息，先让 bridge 完成一轮事件循环，再创建运行时。
   const BOOT_RETRY_LIMIT = 8;
@@ -8,7 +9,7 @@
   let bootCanvas;
   let bootAttempts = 0;
 
-  function scheduleBoot(callback) {
+  function scheduleBoot(callback, delay = 0) {
     const run = () => {
       if (typeof wx !== 'undefined' && typeof wx.nextTick === 'function') {
         try {
@@ -21,7 +22,7 @@
       callback();
     };
     if (typeof setTimeout === 'function') {
-      setTimeout(run, BOOT_RETRY_DELAY);
+      setTimeout(run, delay);
     } else {
       run();
     }
@@ -79,10 +80,14 @@
     return;
   }
 
+  const modulesReadyAt = Date.now();
   function startRuntime() {
     try {
       // 生产入口不把运行时挂到全局对象，避免留下可被外部脚本调用的调试接口。
-      const runtime = runtimeModule.createWxGameRuntime(wx, { autoStart: true });
+      const runtime = runtimeModule.createWxGameRuntime(wx, {
+        autoStart: true,
+        startupTrace: { startedAt, modulesReadyAt, retries: bootAttempts },
+      });
       // 个别 DevTools 版本会在首帧后才把小游戏 Canvas 的显示尺寸同步好。
       // bridge 稳定后再刷新一次 viewport，确保路线卡片不会被默认 300×150
       // 画布裁掉；失败时保留已经成功绘制的首帧，不再反复制造错误。
@@ -93,12 +98,12 @@
           } catch (_error) {
             // 尺寸刷新属于增强兼容，不应让已启动的游戏退回错误页。
           }
-        });
+        }, BOOT_RETRY_DELAY);
       }
     } catch (_error) {
       if (bootAttempts < BOOT_RETRY_LIMIT) {
         bootAttempts += 1;
-        scheduleBoot(startRuntime);
+        scheduleBoot(startRuntime, BOOT_RETRY_DELAY);
         return;
       }
       drawBoot('启动失败，请检查构建与基础库版本');

@@ -6,7 +6,19 @@
       { "type": "folder", "value": "node_modules" },
       { "type": "folder", "value": "scripts" },
       { "type": "folder", "value": "src" },
-      { "type": "folder", "value": "tests" }
+      { "type": "folder", "value": "tests" },
+      { "type": "suffix", "value": ".md" },
+      { "type": "file", "value": "package.json" },
+      { "type": "file", "value": "package-lock.json" },
+      { "type": "file", "value": "tsconfig.json" },
+      { "type": "file", "value": "tsconfig.wxgame.json" },
+      { "type": "file", "value": "assets/audio/tideline-loop.wav" },
+      { "type": "file", "value": "assets/generated/tideline-sprite.svg" },
+      { "type": "file", "value": "assets/generated/tideline-player-sprite.svg" },
+      { "type": "file", "value": "assets/generated/tideline-passenger-atlas.svg" },
+      { "type": "file", "value": "assets/generated/tideline-passenger-slow-sprite.png" },
+      { "type": "file", "value": "assets/generated/tideline-passenger-phone-sprite.png" },
+      { "type": "file", "value": "assets/generated/tideline-passenger-group-sprite.png" }
     ],
     "include": []
   },

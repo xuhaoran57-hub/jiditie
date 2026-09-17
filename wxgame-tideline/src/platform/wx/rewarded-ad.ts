@@ -15,20 +15,36 @@ export class WxRewardedAdAdapter {
   private ad?: RewardedAdLike;
   private pending?: { finish: (result: AdResult) => void };
   private disposed = false;
+  private readonly api: WxRewardedAdApi;
+  private readonly adUnitId: string;
+  private initialized = false;
   readonly unavailableReason: string;
 
   constructor(api: WxRewardedAdApi, adUnitId = '') {
+    this.api = api;
+    this.adUnitId = adUnitId.trim();
     this.unavailableReason = !adUnitId.trim() ? '视频补给暂未开放，可选择分享领取' : '当前暂无可用广告，可选择分享领取';
-    if (adUnitId.trim() && api.createRewardedVideoAd) {
+  }
+
+  /** 首屏后预加载；用户先点击广告时也走同一个幂等入口。 */
+  preload(): void {
+    if (this.initialized || this.disposed) return;
+    this.initialized = true;
+    if (this.adUnitId && this.api.createRewardedVideoAd) {
       try {
-        this.ad = api.createRewardedVideoAd({ adUnitId: adUnitId.trim() });
+        this.ad = this.api.createRewardedVideoAd({ adUnitId: this.adUnitId });
         void this.ad.load().catch(() => undefined);
       } catch { this.ad = undefined; }
     }
   }
 
-  get available(): boolean { return Boolean(this.ad) && !this.disposed; }
+  get available(): boolean {
+    return !this.disposed && (this.initialized
+      ? Boolean(this.ad)
+      : Boolean(this.adUnitId && this.api.createRewardedVideoAd));
+  }
   watch(): Promise<AdResult> {
+    this.preload();
     const ad = this.ad;
     if (!ad || this.disposed || this.pending) return Promise.resolve('unavailable');
     return new Promise((resolve) => {

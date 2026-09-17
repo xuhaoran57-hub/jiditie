@@ -9,6 +9,7 @@ const entrySource = readFileSync(resolve('game.js'), 'utf8');
 function createContext() {
   const timers = [];
   const ticks = [];
+  const delays = [];
   const calls = { runtime: 0, systemInfo: 0, canvas: 0, resize: 0 };
   const context2d = {
     setTransform() {},
@@ -48,13 +49,14 @@ function createContext() {
         },
       };
     },
-    setTimeout(callback) {
+    setTimeout(callback, delay) {
+      delays.push(delay);
       timers.push(callback);
       return timers.length;
     },
     clearTimeout() {},
   };
-  return { sandbox, timers, ticks, calls };
+  return { sandbox, timers, ticks, calls, delays };
 }
 
 function flushQueue(harness) {
@@ -81,4 +83,20 @@ test('入口等待 JSBridge 后重试，启动阶段不读取系统信息', () =
   assert.equal(harness.calls.systemInfo, 0);
   assert.equal(harness.calls.canvas, 0);
   assert.equal(harness.calls.resize, 1);
+  assert.deepEqual(harness.delays, [0, 32, 32], '首次只让出事件循环，失败重试和兼容刷新保留延迟');
+});
+
+test('bridge 持续不可用时有限重试，且 nextTick 抛错仍能显示失败提示', () => {
+  const harness = createContext();
+  harness.sandbox.wx.nextTick = () => { throw Error('bridge not ready'); };
+  harness.sandbox.require = () => ({ createWxGameRuntime() {
+    harness.calls.runtime++;
+    throw Error('bridge not ready');
+  } });
+  vm.runInNewContext(entrySource, harness.sandbox, { filename: 'game.js' });
+  flushQueue(harness);
+  assert.equal(harness.calls.runtime, 9);
+  assert.equal(harness.calls.canvas, 1);
+  assert.equal(harness.calls.resize, 0);
+  assert.deepEqual(harness.delays, [0, ...Array(8).fill(32)]);
 });

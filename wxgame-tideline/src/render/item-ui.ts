@@ -48,7 +48,7 @@ export function itemUiLayout(layout: RenderLayout) {
   return { panel, cards, primary, secondary, single, back, quick, entry, rewardPanel, rewardAction, rewardBack };
 }
 
-export function itemHitAreas(layout: RenderLayout, screen: string, state: GameState, ui: ItemUiState, paused = false): ItemHitArea[] {
+export function itemHitAreas(layout: RenderLayout, screen: string, state: GameState | null, ui: ItemUiState, paused = false): ItemHitArea[] {
   const l = itemUiLayout(layout);
   if (ui.panel) {
     if (ui.status === 'watching' || ui.status === 'saving') return [];
@@ -69,7 +69,7 @@ export function itemHitAreas(layout: RenderLayout, screen: string, state: GameSt
     areas.push({ id: 'ad', rect: l.primary }, { id: 'share', rect: l.secondary });
     return areas;
   }
-  if (screen === 'result' && state.outcome === 'failure') {
+  if (screen === 'result' && state?.outcome === 'failure') {
     const actions = failedResultLayout(layout, ui.claimedResultRewards);
     const areas: ItemHitArea[] = [];
     if (actions.shareTicket) areas.push({ id: 'result-share-ticket', rect: actions.shareTicket });
@@ -77,7 +77,7 @@ export function itemHitAreas(layout: RenderLayout, screen: string, state: GameSt
     return areas;
   }
   if (screen === 'briefing' || screen === 'result') return [{ id: 'supply', rect: l.entry }];
-  if (screen === 'game' && !paused && state.phase !== 'result') return l.quick.map((area) => ({ id: `use:${area.id}`, rect: area.rect }));
+  if (screen === 'game' && state && !paused && state.phase !== 'result') return l.quick.map((area) => ({ id: `use:${area.id}`, rect: area.rect }));
   return [];
 }
 
@@ -138,13 +138,13 @@ function rewardButton(context: RenderContext, rect: Rect, source: 'share' | 'ad'
   label(context, `${ITEMS[id].shortName} ×1`, { x: x + 32, y: rect.y, width: 68, height: rect.height }, 13, enabled ? '#fbffff' : '#9eb5c3');
 }
 
-export function renderItemUi(context: RenderContext, screen: string, state: GameState, ui: ItemUiState, paused = false): void {
+export function renderItemUi(context: RenderContext, screen: string, state: GameState | null, ui: ItemUiState, paused = false): void {
   const l = itemUiLayout(context.layout);
   const c = context.layout.viewport.contentRect;
   context.withScreen(() => {
     const ctx = context.ctx;
     if (screen === 'briefing' || screen === 'result') {
-      const failed = screen === 'result' && state.outcome === 'failure';
+      const failed = screen === 'result' && state?.outcome === 'failure';
       const actions = failedResultLayout(context.layout, ui.claimedResultRewards);
       if (failed) {
         if (actions.shareTicket) rewardButton(context, actions.shareTicket, 'share', 'delay-ticket', ui.shareAvailable);
@@ -154,14 +154,14 @@ export function renderItemUi(context: RenderContext, screen: string, state: Game
       }
       if (screen === 'result') {
         const used = ITEM_IDS.filter((id) => ui.used[id] > 0);
-        const usage = used.length ? `已使用：${used.map((id) => ITEMS[id].shortName).join('、')}` : (state.outcome === 'success' ? '无道具通关' : '本局未使用道具');
+        const usage = used.length ? `已使用：${used.map((id) => ITEMS[id].shortName).join('、')}` : (state?.outcome === 'success' ? '无道具通关' : '本局未使用道具');
         const noteRect = failed
           ? { x: actions.panel.x + 12, y: actions.panel.y + actions.panel.height - 23, width: actions.panel.width - 24, height: 18 }
           : { x: c.x + 12, y: c.y + 58, width: c.width - 24, height: 18 };
         label(context, failed ? `${usage} · 领取后下局可用` : usage, noteRect, 11, '#ffd36a');
       }
     }
-    if (screen === 'game' && state.phase !== 'result' && !paused) {
+    if (screen === 'game' && state && state.phase !== 'result' && !paused) {
       l.quick.forEach(({ id, rect }) => {
         const count = ui.inventory[id] > 99 ? '99+' : String(ui.inventory[id]);
         const needsSupply = ui.inventory[id] <= 0;
@@ -216,7 +216,7 @@ export function renderItemUi(context: RenderContext, screen: string, state: Game
       const hint = ui.panel === 'welcome' ? '进入关卡后点击道具使用' : '分享返回后可领取 1 件道具';
       label(context, hint, { x: p.x + 12, y: descriptionY + 26, width: p.width - 24, height: 20 }, 11, '#b5cad8', 400);
     }
-    if (ui.panel === 'welcome') button(context, l.single, ui.welcomePending ? '重试领取' : '知道了');
+    if (ui.panel === 'welcome') button(context, l.single, ui.welcomePending ? '领取道具' : '知道了');
     else if (ui.status === 'sharing') button(context, l.single, '领取所选道具');
     else if (ui.status === 'save-error') button(context, l.single, '重试保存');
     else if (ui.status === 'watching' || ui.status === 'saving') label(context, ui.status === 'watching' ? '广告准备／播放中…' : '正在保存…', { ...l.primary, width: p.width - 36 });

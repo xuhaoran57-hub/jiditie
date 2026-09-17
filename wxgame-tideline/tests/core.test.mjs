@@ -262,6 +262,31 @@ test('疏导最多影响两人，并按人流方向和敏感群组调整礼让�
   assert.ok(state.metrics.courtesyPoints < before, '敏感群组或被阻挡的人流应降低礼让值');
 });
 
+test('效率分只由玩家上车时间决定，不受 NPC 上车率和受阻次数影响', () => {
+  const simulation = new GameSimulation('sea-gate', 2026);
+  const state = simulation.snapshot();
+  state.outcome = 'success';
+  state.metrics.doorRemainingAtFinish = simulation.level.boardingDuration / 2;
+  state.metrics.boarded = state.metrics.boardingTotal;
+  assert.equal(calculateScore(state, simulation.level).efficiency, 73);
+
+  state.metrics.boarded = 0;
+  state.metrics.lateBoardingAttempts = 1000;
+  assert.equal(calculateScore(state, simulation.level).efficiency, 73);
+
+  state.metrics.boardingTotal = 0;
+  assert.equal(calculateScore(state, simulation.level).efficiency, 73);
+
+  state.metrics.doorRemainingAtFinish = 0;
+  assert.equal(calculateScore(state, simulation.level).efficiency, 45);
+
+  state.metrics.doorRemainingAtFinish = simulation.level.boardingDuration + 3;
+  assert.equal(calculateScore(state, simulation.level).efficiency, 100, '延时后的效率分仍封顶 100');
+
+  state.outcome = 'failure';
+  assert.equal(calculateScore(state, simulation.level).efficiency, 20, '失败局保留原上车时间分');
+});
+
 test('礼让分不会因高密度碰撞直接归零', () => {
   const simulation = new GameSimulation('sea-gate', 2026);
   const state = simulation.snapshot();

@@ -17,10 +17,10 @@ function finishLevel(runtime, success = false) {
 }
 
 function assertResultRewardButtons(h, expected) {
-  h.context.operations.length = 0; h.runtime.tick(0);
+  h.runtime.tick(0);
   const areas = itemHitAreas(h.runtime.renderer.context.layout, h.runtime.screen, h.runtime.state, h.runtime.getItemUi());
   assert.deepEqual(areas.map(({ id }) => id), expected);
-  const labels = h.context.operations.map(([text]) => text);
+  const labels = h.context.frameOperations.map(([text]) => text);
   assert.equal(labels.includes('车票 ×1'), expected.includes('result-share-ticket'));
   assert.equal(labels.includes('喇叭 ×1'), expected.includes('result-ad-horn'));
 }
@@ -187,7 +187,7 @@ test('暂停或弹窗不接受旧道具命令，关闭提示保留原页面', ()
 test('首页及新手提示不显示背包入口，局内库存为空时显示对应领取图标', () => {
   const h = createHarness();
   assert.ok(!h.context.operations.some(([text]) => text.includes('背包')));
-  h.tap('close'); h.context.operations.length = 0; h.runtime.tick(0);
+  h.tap('close'); h.runtime.tick(0);
   assert.deepEqual(itemHitAreas(h.runtime.renderer.context.layout, 'home', {}, h.runtime.getItemUi()), []);
   assert.ok(!h.context.operations.some(([text]) => text.includes('背包')));
   startBoarding(h.runtime); h.context.operations.length = 0; h.runtime.tick(0);
@@ -295,14 +295,14 @@ test('失败领取入口只在失败结算显示，通关仍保留原补给入�
   const h = createHarness(); h.tap('close');
   const areas = () => itemHitAreas(h.runtime.renderer.context.layout, h.runtime.screen, h.runtime.state ?? {}, h.runtime.getItemUi());
   assert.ok(areas().every((area) => !area.id.startsWith('result-')));
-  finishLevel(h.runtime); h.context.operations.length = 0; h.runtime.tick(0);
+  finishLevel(h.runtime);
   assert.deepEqual(areas().map((area) => area.id), ['result-share-ticket', 'result-ad-horn']);
-  const labels = h.context.operations.map(([text]) => text);
+  const labels = h.context.frameOperations.map(([text]) => text);
   assert.ok(labels.includes('车票 ×1')); assert.ok(labels.includes('喇叭 ×1'));
   assert.ok(!labels.some((text) => text.startsWith('补给  ')));
-  finishLevel(h.runtime, true); h.context.operations.length = 0; h.runtime.tick(0);
+  finishLevel(h.runtime, true);
   assert.deepEqual(areas().map((area) => area.id), ['supply']);
-  assert.ok(!h.context.operations.some(([text]) => text === '车票 ×1' || text === '喇叭 ×1'));
+  assert.ok(!h.context.frameOperations.some(([text]) => text === '车票 ×1' || text === '喇叭 ×1'));
   h.runtime.destroy();
 });
 
@@ -344,7 +344,7 @@ test('失败页领取后剩余按钮逐行居中，绘制和点击位置随布�
       const layout = h.runtime.renderer.context.layout;
       const currentActions = () => failedResultLayout(layout, h.runtime.getItemUi().claimedResultRewards);
       const checkLayout = () => {
-        h.context.operations.length = 0; h.runtime.tick(0);
+        h.runtime.tick(0);
         const actions = currentActions();
         const rects = [actions.retry, actions.route, actions.shareTicket, actions.adHorn].filter(Boolean);
         const c = layout.viewport.contentRect;
@@ -359,7 +359,7 @@ test('失败页领取后剩余按钮逐行居中，绘制和点击位置随布�
           for (let i = 1; i < row.length; i++) assert.ok(Math.abs(row[i].x - row[i - 1].x - row[i - 1].width - 10) < 1e-6, '可见按钮之间没有空位');
         }
         for (const [text, rect, textOffset] of [['重试', actions.retry, 0], ['路线', actions.route, 0], ['车票 ×1', actions.shareTicket, 16], ['喇叭 ×1', actions.adHorn, 16]]) {
-          const operation = h.context.operations.find(([label]) => label === text);
+          const operation = h.context.frameOperations.find(([label]) => label === text);
           if (!rect) { assert.equal(operation, undefined); continue; }
           assert.ok(operation, text);
           assert.ok(Math.abs(operation[1] - rect.x - rect.width / 2 - textOffset) < 1e-6, `${text} 显示位置与命中布局一致`);

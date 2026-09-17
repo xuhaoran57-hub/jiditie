@@ -9,6 +9,8 @@ import { emptySave, serializeSave } from '../src/core/save-schema.ts';
 test('首次进入各发一件并提示局内使用，关闭与重启不重复发放', () => {
   const h = createHarness();
   assert.equal(h.runtime.getItemUi().panel, 'welcome');
+  assert.equal(h.writes.length, 0, '首屏提交前不写入欢迎礼包');
+  h.runtime.tick(0);
   assert.deepEqual(h.runtime.saveData.items.inventory, { 'commute-horn': 1, 'delay-ticket': 1 });
   h.tap('close'); assert.equal(h.runtime.getItemUi().panel, null); h.runtime.destroy();
   const reloaded = new GameRuntime(h.wx);

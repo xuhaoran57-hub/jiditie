@@ -5,12 +5,13 @@ import { itemHitAreas } from '../../src/render/item-ui.ts';
 
 export class MockContext {
   operations = [];
+  frameOperations = [];
   fillStyle = '#000'; strokeStyle = '#000'; lineWidth = 1; globalAlpha = 1;
   font = ''; textAlign = 'left'; textBaseline = 'middle';
   save() {} restore() {} translate() {} scale() {} rotate() {} beginPath() {} closePath() {}
   moveTo() {} lineTo() {} quadraticCurveTo() {} arc() {} ellipse() {} rect() {} fill() {} stroke() {}
-  fillRect() {} strokeRect() {} clearRect() {} setLineDash() {} setTransform() {} roundRect() {}
-  fillText(...args) { this.operations.push(args); } strokeText() {}
+  fillRect() {} strokeRect() {} clearRect() { this.frameOperations = []; } setLineDash() {} setTransform() {} roundRect() {}
+  fillText(...args) { this.operations.push(args); this.frameOperations.push(args); } strokeText() {}
   measureText(text) { return { width: text.length * 8 }; }
 }
 

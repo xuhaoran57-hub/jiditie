@@ -19,7 +19,7 @@
     "test:platform": "node --experimental-strip-types --test tests/platform.test.mjs",
     "test:m5": "node --experimental-strip-types --test tests/m5.test.mjs",
     "test:m7": "node --experimental-strip-types --test tests/m7.test.mjs",
-    "test:entry": "node --test tests/entry.test.mjs",
+    "test:entry": "node --experimental-strip-types --test tests/entry.test.mjs tests/startup.test.mjs tests/runtime-performance.test.mjs",
     "bench:simulation": "node --experimental-strip-types scripts/benchmark-simulation.mjs",
     "evaluate:difficulty": "node --experimental-strip-types scripts/evaluate-difficulty.mjs",
     "check:release": "node scripts/check-release.mjs",

@@ -52,6 +52,8 @@ wxgame-tideline/
 
 ## 文档入口
 
+- [STARTUP_PERFORMANCE.md](./STARTUP_PERFORMANCE.md)：启动优化、包体变化、计时点和真机复测方法。
+
 - [GAME_DESIGN.md](./GAME_DESIGN.md)：产品定位、玩法、关卡、内容和验收目标。
 - [ITEM_SYSTEM_IMPLEMENTATION.md](./ITEM_SYSTEM_IMPLEMENTATION.md)：局内道具库存、广告／分享直接领取、激励视频配置及验证说明。
 - [ITEM_SYSTEM_DEVELOPMENT_PLAN.md](./ITEM_SYSTEM_DEVELOPMENT_PLAN.md)：道具系统设计与开发方案。

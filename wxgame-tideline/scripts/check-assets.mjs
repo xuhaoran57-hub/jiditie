@@ -16,6 +16,7 @@ const requiredFiles = [
   'generated/tideline-passenger-atlas.svg',
   'generated/tideline-passenger-atlas.png',
   'audio/tideline-loop.wav',
+  'audio/tideline-loop.mp3',
   'audio/ui-guide.wav',
   'audio/ui-success.wav',
   'audio/ui-failure.wav',
@@ -117,6 +118,36 @@ for (const relative of requiredFiles.filter((file) => file.endsWith('.wav'))) {
   } catch (error) {
     fail(`${relative} 无法读取：${error instanceof Error ? error.name : 'unknown'}`);
   }
+}
+
+// 生产 BGM 为带 LAME 延迟/填充信息的 MPEG-2 Layer III；逐帧检查，防止误传 WAV 或截断文件。
+try {
+  const mp3 = readFileSync(resolve(assetsDir, 'audio/tideline-loop.mp3'));
+  let offset = 0;
+  let frames = 0;
+  while (offset + 4 <= mp3.length) {
+    const header = mp3.readUInt32BE(offset);
+    if ((header >>> 21) !== 0x7ff || ((header >>> 19) & 3) !== 2 || ((header >>> 17) & 3) !== 1
+      || ((header >>> 12) & 15) !== 10 || ((header >>> 10) & 3) !== 0 || ((header >>> 6) & 3) !== 3) {
+      throw new Error('需要 22050Hz / 96kbps / mono MPEG-2 Layer III');
+    }
+    offset += Math.floor(72 * 96000 / 22050) + ((header >>> 9) & 1);
+    frames += 1;
+  }
+  if (offset !== mp3.length || frames < 700 || frames > 730) throw new Error('帧数、时长或完整性异常');
+  if (!mp3.subarray(0, 313).includes(Buffer.from('Info')) || !mp3.subarray(0, 313).includes(Buffer.from('LAME'))) {
+    throw new Error('缺少循环所需的 LAME 延迟/填充元数据');
+  }
+  const tag = mp3.indexOf(Buffer.from('LAME'));
+  const encoderDelay = (mp3[tag + 21] << 4) | (mp3[tag + 22] >>> 4);
+  const encoderPadding = ((mp3[tag + 22] & 15) << 8) | mp3[tag + 23];
+  const source = readFileSync(resolve(assetsDir, 'audio/tideline-loop.wav'));
+  if ((frames - 1) * 576 - encoderDelay - encoderPadding !== source.readUInt32LE(40) / 2) {
+    throw new Error('MP3 的有效采样数与源 WAV 不一致，请重新压缩背景音乐');
+  }
+  if (mp3.length > 256 * 1024) throw new Error('超过 256KiB 预算');
+} catch (error) {
+  fail(`BGM MP3 无法验证：${error.message}`);
 }
 
 if (!process.exitCode) console.log(`资源检查通过：${requiredFiles.length} 个条目`);

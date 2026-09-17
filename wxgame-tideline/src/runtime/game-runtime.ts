@@ -106,7 +106,7 @@ export interface RuntimeAudioSources {
 
 /** M6 随包提供的自有音效；调用方可用 `audioSources` 覆盖或置空单项。 */
 export const DEFAULT_RUNTIME_AUDIO_SOURCES: Required<RuntimeAudioSources> = {
-  music: 'assets/audio/tideline-loop.wav',
+  music: 'assets/audio/tideline-loop.mp3',
   guide: 'assets/audio/ui-guide.wav',
   success: 'assets/audio/ui-success.wav',
   failure: 'assets/audio/ui-failure.wav',
@@ -114,6 +114,8 @@ export const DEFAULT_RUNTIME_AUDIO_SOURCES: Required<RuntimeAudioSources> = {
 };
 
 export interface GameRuntimeOptions {
+  /** 入口使用同一 Date.now 时钟记录模块加载阶段；不上传、不输出生产日志。 */
+  startupTrace?: { startedAt: number; modulesReadyAt: number; retries: number };
   rewardedAdUnitId?: string;
   api?: WxGameApi;
   /** `wx` 是面向入口调用的别名，和 api 二选一即可。 */
@@ -160,6 +162,9 @@ export interface RuntimeSnapshot {
   state: GameState | null;
 }
 
+export type StartupStage = 'modulesReady' | 'runtimeStarted' | 'canvasReady' | 'storageReady'
+  | 'runtimeReady' | 'homeSubmitted' | 'preloadsStarted';
+
 const DEFAULT_SEED: number | string = 1;
 
 function isWxApi(value: GameRuntimeOptions | WxGameApi): value is WxGameApi {
@@ -183,6 +188,15 @@ function silentAudioApi(): WxAudioApi {
 }
 
 function defaultScheduler(api: WxGameApi | undefined, now: () => number): RuntimeScheduler {
+  // 小游戏的原生 rAF 挂在全局对象上；wx 命名空间版本仅用于兼容注入适配器。
+  if (typeof globalThis.requestAnimationFrame === 'function') {
+    const request = globalThis.requestAnimationFrame.bind(globalThis);
+    const cancel = globalThis.cancelAnimationFrame?.bind(globalThis);
+    return {
+      request: (callback) => request(callback),
+      cancel: (handle) => { cancel?.(handle as number); },
+    };
+  }
   if (api?.requestAnimationFrame) {
     const request = api.requestAnimationFrame.bind(api);
     const cancel = api.cancelAnimationFrame?.bind(api);
@@ -235,7 +249,10 @@ export class GameRuntime {
   private saveValue: SaveData;
   private simulation?: GameSimulation;
   private currentSeed: number | string;
-  private previewState: GameState;
+  private startupTask = 0;
+  private readonly startupOrigin: number;
+  private readonly startupRetries: number;
+  private readonly startupTimings: Partial<Record<StartupStage, number>> = {};
   private userPaused = false;
   private lifecyclePaused = false;
   private runningValue = false;
@@ -267,11 +284,16 @@ export class GameRuntime {
   private pendingUseApplied = false;
   private musicStarted = false;
   private audioEventCursor = 0;
+  private renderDirty = true;
+  private renderedAssetVersion = 0;
+  private renderedMessage = '';
+  private renderedAdAvailable = false;
+  private inputLayout?: GameRenderer['context']['layout'];
 
   private handleFrame(timestamp: number, token: number): void {
     if (token !== this.scheduleToken) return;
     this.frameHandle = null;
-    if (!this.runningValue) return;
+    if (!this.runningValue || this.lifecyclePaused || this.disposed) return;
     const current = Number.isFinite(timestamp) ? timestamp : this.now();
     if (this.lastFrameTimestamp === undefined) {
       this.lastFrameTimestamp = current;
@@ -301,6 +323,12 @@ export class GameRuntime {
       : configuredLevels;
     this.baseSeed = options.seed ?? DEFAULT_SEED;
     this.now = options.now ?? (() => Date.now());
+    this.startupOrigin = options.startupTrace?.startedAt ?? this.now();
+    this.startupRetries = options.startupTrace?.retries ?? 0;
+    if (options.startupTrace) {
+      this.startupTimings.modulesReady = Math.max(0, options.startupTrace.modulesReadyAt - this.startupOrigin);
+    }
+    this.markStartup('runtimeStarted');
     this.audioSources = {
       ...DEFAULT_RUNTIME_AUDIO_SOURCES,
       ...(options.audioSources ?? {}),
@@ -320,21 +348,24 @@ export class GameRuntime {
         canvasAdapter.viewport.dpr,
         canvasAdapter.viewport.insets,
         this.levels[0],
-        { imageFactory: canvasAdapter.imageFactory, canvasFactory: canvasAdapter.offscreenCanvasFactory },
+        { imageFactory: canvasAdapter.imageFactory, canvasFactory: canvasAdapter.offscreenCanvasFactory, deferLoading: true },
       );
     } else {
       throw new Error('GameRuntime requires a renderer or canvasAdapter');
     }
 
+    this.markStartup('canvasReady');
     this.storage = options.storageAdapter ?? createWxStorageAdapter(api ?? {});
     const loaded = typeof this.storage.loadWithStatus === 'function'
       ? this.storage.loadWithStatus() : { save: this.storage.load(), status: 'loaded' as const };
     this.storageWritable = loaded.status !== 'unsupported' && loaded.status !== 'unavailable';
     this.saveValue = this.normalizeSave(loaded.save);
     if (loaded.status === 'missing') this.saveValue.items.welcomeGiftStatus = 'eligible';
+    this.markStartup('storageReady');
     this.rewards = new RewardService(() => this.saveValue, (next) => {
       if (!this.storageWritable || !this.storage.save(next)) return false;
       this.saveValue = next;
+      this.renderDirty = true;
       return true;
     });
     this.rewardedAd = new WxRewardedAdAdapter(api ?? {}, options.rewardedAdUnitId ?? REWARD_CONFIG.adUnitId);
@@ -379,21 +410,46 @@ export class GameRuntime {
     const initialIndex = this.resolveInitialIndex(options.initialLevelId);
     this.selectedLevelIndexValue = initialIndex;
     this.currentSeed = this.seedForLevel(this.currentLevel.id);
-    this.previewState = new GameSimulation(this.currentLevel, this.currentSeed).snapshot();
-    this.updateInputLayout();
-    this.syncLoopPause();
-
     if (this.saveValue.items.pendingUse && !this.rewards.recoverUse()) {
       this.notice('有未完成的道具使用，恢复存储后重试');
     }
     if (this.saveValue.items.welcomeGiftStatus === 'eligible') {
-      const granted = this.rewards.welcome();
       this.itemPanel = 'welcome';
-      this.itemMessage = granted ? '两种道具已领取，进入游戏后点击使用' : '暂时无法保存，请重试领取';
+      this.itemMessage = '领取后进入游戏，点击道具即可使用';
     }
     this.syncLoopPause();
     this.updateInputLayout();
+    this.markStartup('runtimeReady');
     if (options.autoStart) this.start();
+  }
+
+  /** 毫秒时间点相对入口开始；绘制提交不代表 GPU 上屏，预加载发起不代表解码完成。 */
+  getStartupTimings(): Partial<Record<StartupStage, number>> & { retries: number } {
+    return { ...this.startupTimings, retries: this.startupRetries };
+  }
+
+  private markStartup(stage: StartupStage): void {
+    if (this.startupTimings[stage] === undefined) {
+      this.startupTimings[stage] = Math.max(0, this.now() - this.startupOrigin);
+    }
+  }
+
+  private runStartupTask(): void {
+    // start() 已绘制首页，第一轮帧回调让出后再分帧完成非首屏工作。
+    if (!this.runningValue || this.disposed || this.lifecyclePaused) return;
+    if (this.startupTask === 0) {
+      if (this.saveValue.items.welcomeGiftStatus === 'eligible' && this.itemPanel === 'welcome') {
+        const granted = this.rewards.welcome();
+        this.itemMessage = granted ? '两种道具已领取，进入游戏后点击使用' : '暂时无法保存，请重试领取';
+        this.renderDirty = true;
+      }
+    } else if (this.startupTask === 1) {
+      this.renderer.preloadAssets?.();
+    } else if (this.startupTask === 2) {
+      this.rewardedAd.preload();
+      this.markStartup('preloadsStarted');
+    } else return;
+    this.startupTask += 1;
   }
 
   get screen(): RuntimeScreen {
@@ -460,6 +516,14 @@ export class GameRuntime {
   stop(): boolean {
     if (!this.runningValue) return false;
     this.runningValue = false;
+    this.cancelFrame();
+    this.input.detach();
+    this.lifecycle.detach();
+    this.diagnostics.detach();
+    return true;
+  }
+
+  private cancelFrame(): void {
     this.scheduleToken += 1;
     this.lastFrameTimestamp = undefined;
     if (this.frameHandle !== null) {
@@ -470,10 +534,6 @@ export class GameRuntime {
       }
       this.frameHandle = null;
     }
-    this.input.detach();
-    this.lifecycle.detach();
-    this.diagnostics.detach();
-    return true;
   }
 
   destroy(): void {
@@ -483,11 +543,15 @@ export class GameRuntime {
     this.rewardedAd.destroy();
     this.stop();
     this.audio.destroy();
+    this.renderer.destroy?.();
   }
 
   /** 手动推进一帧，测试和桌面调试可直接调用；frameDelta 单位为秒。 */
   tick(frameDelta: number): number {
+    if (this.disposed) return 0;
     this.syncExternalLifecycleState();
+    if (this.lifecyclePaused) return 0;
+    this.runStartupTask();
     const flowChanged = this.processCommands();
     this.syncExternalLifecycleState();
 
@@ -497,7 +561,7 @@ export class GameRuntime {
       steps = this.loop.advance(frameDelta, this.simulation, () => this.sampleSimulationInput());
       this.detectResult();
     }
-    this.render();
+    this.render(false);
     return steps;
   }
 
@@ -514,9 +578,16 @@ export class GameRuntime {
   }
 
   resize(): void {
+    const previous = this.renderer.context.layout.viewport;
+    const canvas = this.canvasAdapter?.canvas;
+    const canvasChanged = canvas && (canvas.width !== Math.round(previous.width * previous.dpr)
+      || canvas.height !== Math.round(previous.height * previous.dpr));
     const viewport = this.canvasAdapter?.refresh() ?? this.renderer.context.layout.viewport;
+    if (!canvasChanged && viewport.width === previous.width && viewport.height === previous.height
+      && viewport.dpr === previous.dpr
+      && viewport.insets.top === previous.insets.top && viewport.insets.right === previous.insets.right
+      && viewport.insets.bottom === previous.insets.bottom && viewport.insets.left === previous.insets.left) return;
     this.renderer.resize(viewport.width, viewport.height, viewport.dpr, viewport.insets);
-    this.updateInputLayout();
     this.render();
   }
 
@@ -535,7 +606,6 @@ export class GameRuntime {
     }
     this.screenValue = 'briefing';
     this.simulation = undefined;
-    this.previewState = new GameSimulation(this.currentLevel, this.seedForLevel(this.currentLevel.id)).snapshot();
     this.updateInputLayout();
     this.render();
     return true;
@@ -590,7 +660,6 @@ export class GameRuntime {
     this.userPaused = false;
     this.input.reset();
     this.loop.reset();
-    this.previewState = new GameSimulation(this.currentLevel, this.seedForLevel(this.currentLevel.id)).snapshot();
     this.syncLoopPause();
     this.updateInputLayout();
     this.render();
@@ -608,7 +677,6 @@ export class GameRuntime {
     this.userPaused = false;
     this.input.reset();
     this.loop.reset();
-    this.previewState = new GameSimulation(this.currentLevel, this.seedForLevel(this.currentLevel.id)).snapshot();
     this.syncLoopPause();
     this.updateInputLayout();
     this.render();
@@ -720,6 +788,7 @@ export class GameRuntime {
   }
 
   setSoundEnabled(enabled: boolean): void {
+    this.renderDirty = true;
     this.audio.setSoundEnabled(enabled);
     this.saveValue = migrateSave({ ...this.saveValue, settings: { ...this.saveValue.settings, soundEnabled: enabled } });
     if (!this.storageWritable) this.recoverySettings.soundEnabled = enabled;
@@ -727,6 +796,7 @@ export class GameRuntime {
   }
 
   setMusicEnabled(enabled: boolean): void {
+    this.renderDirty = true;
     this.audio.setMusicEnabled(enabled);
     if (enabled) this.musicStarted = false;
     this.saveValue = migrateSave({ ...this.saveValue, settings: { ...this.saveValue.settings, musicEnabled: enabled } });
@@ -830,7 +900,6 @@ export class GameRuntime {
     this.currentSeed = this.seedForLevel(activeLevel.id);
     this.simulation = new GameSimulation(activeLevel, this.currentSeed);
     this.audioEventCursor = 0;
-    this.previewState = this.simulation.snapshot();
     this.screenValue = 'game';
     this.routeMenuExpanded = false;
     this.userPaused = false;
@@ -850,6 +919,7 @@ export class GameRuntime {
     const commands = this.input.consumeCommands();
     let flowChanged = false;
     for (const command of commands) {
+      this.renderDirty = true;
       if (command.type === 'item-action') {
         this.handleItemAction(command.id);
         // 打开或关闭面板的这一帧不推进时间，避免补算广告前后的间隔。
@@ -978,7 +1048,6 @@ export class GameRuntime {
     this.currentSeed = this.seedForLevel(level.id);
     this.simulation = new GameSimulation(level, this.currentSeed);
     this.audioEventCursor = 0;
-    this.previewState = this.simulation.snapshot();
     this.screenValue = 'game';
     this.routeMenuExpanded = false;
     this.userPaused = false;
@@ -994,6 +1063,7 @@ export class GameRuntime {
     const state = this.simulation.getState();
     if (state.phase !== 'result') return;
     this.resultRecorded = true;
+    this.renderDirty = true;
     const level = this.currentLevel;
     if (this.endlessActive && level.id === ENDLESS_LEVEL_ID) {
       const completedWave = state.outcome === 'success' ? this.endlessWave : Math.max(0, this.endlessWave - 1);
@@ -1058,8 +1128,9 @@ export class GameRuntime {
     this.queuedItem = undefined;
     this.input.reset();
     this.lifecyclePaused = true;
+    this.cancelFrame();
+    this.renderDirty = true;
     this.syncLoopPause();
-    if (this.runningValue) this.render();
   }
 
   private handleLifecycleResume(): void {
@@ -1069,13 +1140,16 @@ export class GameRuntime {
     const requestId = this.share.onShow();
     if (requestId && this.rewardRequest?.id === requestId) this.claimShare();
     this.syncLoopPause();
-    if (this.runningValue) this.render();
+    if (this.runningValue) {
+      this.render();
+      this.scheduleFrame();
+    }
   }
 
   private syncExternalLifecycleState(): void {
     if (this.lifecycle.paused === this.lifecyclePaused) return;
-    this.lifecyclePaused = this.lifecycle.paused;
-    this.syncLoopPause();
+    if (this.lifecycle.paused) this.handleLifecyclePause();
+    else this.handleLifecycleResume();
   }
 
   private syncLoopPause(): void {
@@ -1084,7 +1158,7 @@ export class GameRuntime {
   }
 
   private scheduleFrame(): void {
-    if (!this.runningValue || this.frameHandle !== null) return;
+    if (!this.runningValue || this.lifecyclePaused || this.disposed || this.frameHandle !== null) return;
     try {
       const token = this.scheduleToken;
       this.frameHandle = this.scheduler.request((timestamp) => this.handleFrame(timestamp, token)) ?? null;
@@ -1094,11 +1168,21 @@ export class GameRuntime {
     }
   }
 
-  private render(): void {
+  private render(force = true): void {
+    if (this.disposed) return;
+    if (force) this.renderDirty = true;
+    if (this.lifecyclePaused) return;
     this.detectResult();
+    const animated = this.screenValue === 'game' && !this.paused && this.state?.phase !== 'result';
+    const usesSprites = this.screenValue === 'appearance' || this.screenValue === 'game' || this.screenValue === 'result';
+    const assetVersion = usesSprites ? (this.renderer.assetVersion ?? 0) : 0;
+    const message = this.visibleItemMessage();
+    const adAvailable = this.rewardedAd.available;
+    if (!this.renderDirty && !animated && assetVersion === this.renderedAssetVersion
+      && message === this.renderedMessage && adAvailable === this.renderedAdAvailable) return;
     this.processAudioEvents();
     const level = this.currentLevel;
-    const state = this.simulation?.getState() ?? this.previewState;
+    const state = this.state;
     const options: RenderOptions = {
       itemUi: this.getItemUi(),
       screen: this.screenValue,
@@ -1119,7 +1203,13 @@ export class GameRuntime {
       endlessBestScore: this.saveValue.endlessBestScore,
     };
     this.renderer.render(state, level, options);
-    this.updateInputLayout();
+    if (this.renderDirty || this.inputLayout !== this.renderer.context.layout) this.updateInputLayout();
+    this.renderDirty = false;
+    // render() 可能按需加载图片；记录绘制前状态以便下一帧处理同步/异步就绪。
+    this.renderedAssetVersion = assetVersion;
+    this.renderedMessage = message;
+    this.renderedAdAvailable = adAvailable;
+    if (this.screenValue === 'home') this.markStartup('homeSubmitted');
   }
 
   private emptyTouchLayout(): TouchControlsLayout {
@@ -1159,6 +1249,7 @@ export class GameRuntime {
 
   private updateInputLayout(): void {
     const layout = this.renderer.context.layout;
+    this.inputLayout = layout;
     const offscreen = { x: -1000, y: -1000 };
     const base: TouchControlsLayout = {
       joystickCenter: offscreen,
@@ -1166,7 +1257,7 @@ export class GameRuntime {
       guideButtonRect: { x: -1000, y: -1000, width: 1, height: 1 },
     };
 
-    base.itemHitAreas = itemHitAreas(layout, this.screenValue, this.state ?? this.previewState, this.getItemUi(), this.paused);
+    base.itemHitAreas = itemHitAreas(layout, this.screenValue, this.state, this.getItemUi(), this.paused);
     if (this.itemPanel || this.rewardStatus === 'watching') {
       this.input.setLayout(base);
       return;
@@ -1245,7 +1336,7 @@ export class GameRuntime {
       panel: this.itemPanel, selected: this.selectedItem, status: this.rewardStatus,
       inventory: { ...this.saveValue.items.inventory }, used: { ...this.usedItems },
       claimedResultRewards: [...this.claimedResultRewards],
-      message: this.itemPanel || this.now() < this.messageUntil ? this.itemMessage : '',
+      message: this.visibleItemMessage(),
       adAvailable: this.rewardedAd.available, shareAvailable: this.share.available,
       endless: this.currentLevel.id === ENDLESS_LEVEL_ID,
       welcomePending: this.saveValue.items.welcomeGiftStatus === 'eligible',
@@ -1284,6 +1375,11 @@ export class GameRuntime {
 
   closeItemPanel(): boolean {
     if (this.rewardStatus === 'watching' || this.rewardStatus === 'saving') return false;
+    this.renderDirty = true;
+    // 首屏后任务尚未执行时，用户也可以立即领取/关闭，不会丢失首次赠送。
+    if (this.itemPanel === 'welcome' && this.saveValue.items.welcomeGiftStatus === 'eligible') {
+      this.rewards.welcome();
+    }
     if (this.itemPanel === 'welcome' && this.saveValue.items.welcomeGiftStatus === 'granted') {
       this.saveValue.items.tutorialSeen = true;
       this.persistProgress();
@@ -1350,7 +1446,15 @@ export class GameRuntime {
   }
 
   private persistProgress(): boolean { return this.ensureStorageReady() && this.storage.save(this.saveValue); }
-  private notice(message: string): void { this.itemMessage = message; this.messageUntil = this.now() + 2400; }
+  private visibleItemMessage(): string {
+    return this.itemPanel || this.now() < this.messageUntil ? this.itemMessage : '';
+  }
+
+  private notice(message: string): void {
+    this.itemMessage = message;
+    this.messageUntil = this.now() + 2400;
+    this.renderDirty = true;
+  }
 
   queueItem(id: ItemId): boolean {
     const state = this.state;

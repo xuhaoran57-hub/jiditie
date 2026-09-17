@@ -12,6 +12,10 @@
 
 `m7.test.mjs` 使用 220 人压力关卡覆盖有限状态、NaN 防护、同种子确定性重放、快速启动/停止、前后台暂停、重试、连续切关和返回路线，重点防止 ticker 倍增或状态串线。
 
+`runtime-performance.test.mjs` 覆盖全局原生 rAF、取消过期回调、前后台恢复时间基线、静态页无重复绘制、触摸布局复用、暂停/结算/补给刷新和提示过期。`startup.test.mjs` 同时验证异步图集加载后补画；`render.test.mjs` 验证单张背景缓存复用、主题/几何/视口失效、小数 DPR 对齐和能力失败回退。
+
+道具测试的 `frameOperations` 保存当前画面上的文字，只有 `clearRect` 才清空；静态页面没有新绘制时仍保留上一帧，避免测试依赖每次 `tick()` 都重画。
+
 ```text
 npm run check
 ```

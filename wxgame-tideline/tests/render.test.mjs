@@ -4,8 +4,10 @@ import { APPEARANCE_OPTIONS } from '../src/core/appearance.ts';
 import { readFileSync } from 'node:fs';
 import { drawPlayerPreview } from '../src/render/actor-renderer.ts';
 import { playerAppearancePalette } from '../src/render/player-appearance.ts';
+import { StationBackgroundCache } from '../src/render/station-background.ts';
+import { renderStationBackground, renderStationForeground } from '../src/render/station-renderer.ts';
 
-import { CARRIAGE_THEMES, GameSimulation, MVP_LEVELS } from '../src/core/index.ts';
+import { CAMPAIGN_LEVELS, CARRIAGE_THEMES, GameSimulation, MVP_LEVELS } from '../src/core/index.ts';
 import { DebugInputController, FixedTimestepLoop } from '../src/platform/debug/index.ts';
 import {
   GameRenderer,
@@ -234,6 +236,50 @@ test('MVP carriage bounds leave a taller upper stage above the platform', () => 
   for (const level of MVP_LEVELS) {
     assert.equal(level.trainBounds.height, 300, `${level.id} should use the 300px carriage bounds`);
     assert.equal(level.trainBounds.y + level.trainBounds.height, level.platformBounds.y);
+  }
+});
+
+test('单门和双门车厢的完整窗户避开门框，门顶高于窗带', () => {
+  const levels = [...CAMPAIGN_LEVELS, {
+    ...MVP_LEVELS[2], doors: [...MVP_LEVELS[2].doors].reverse(),
+  }];
+  for (const level of levels) {
+    const context = new MockContext();
+    const windows = [];
+    const windowShade = stationColorsFor(level.carriageTheme).windowShade;
+    context.roundRect = (x, y, width, height) => {
+      if (context.fillStyle === windowShade) windows.push({ x, y, width, height });
+    };
+    const renderContext = new RenderContext(context, createViewportMetrics(916, 420), {
+      x: 0, y: level.trainBounds.y, width: 320,
+      height: level.trainBounds.height + level.platformBounds.height,
+    });
+    renderStationBackground(renderContext, level);
+    assert.ok(windows.length > 0, `${level.id} 保留车窗`);
+    for (const window of windows) {
+      assert.ok(window.width >= 24, `${level.id} 不产生窄条残窗`);
+      assert.ok(window.x >= level.trainBounds.x);
+      assert.ok(window.x + window.width <= level.trainBounds.x + level.trainBounds.width);
+      for (const door of level.doors) {
+        const left = door.center.x - door.width / 2;
+        const right = door.center.x + door.width / 2;
+        assert.ok(window.x + window.width <= left - 8 || window.x >= right + 8,
+          `${level.id} 的车窗与 ${door.id} 门框之间留有车身间隔`);
+      }
+    }
+
+    const state = new GameSimulation(level, 4242).getState();
+    for (const open of [false, true]) {
+      context.operations.length = 0;
+      state.doors.forEach((door) => { door.open = open; });
+      renderStationForeground(renderContext, level, state);
+      for (const door of level.doors) {
+        const frame = context.operations.find(([name, x, , width]) =>
+          name === 'strokeRect' && x === door.center.x - door.width / 2 && width === door.width);
+        assert.ok(frame, `${level.id} 绘制 ${door.id} 门框`);
+        assert.ok(frame[2] < windows[0].y, '门顶高于窗带，不能从窗户中段开始');
+      }
+    }
   }
 });
 
@@ -707,4 +753,129 @@ test('下车乘客穿过门洞后仍参与站台人流', () => {
   }
   renderActors(renderContext, state, MVP_LEVELS[0]);
   assert.ok(context.operations.some(([name, x, y]) => name === 'translate' && x === 160 && y === 240));
+});
+
+test('站台背景缓存复用静态绘制，车门和人流仍逐帧绘制', () => {
+  const context = new MockContext();
+  const cachedContext = new MockContext();
+  const backgroundCanvas = makeCanvas(cachedContext);
+  let allocations = 0;
+  const renderer = GameRenderer.fromCanvas(makeCanvas(context), 667, 375, 2, {}, MVP_LEVELS[0], {
+    canvasFactory: () => { allocations++; return backgroundCanvas; },
+  });
+  renderer.render(null, MVP_LEVELS[0], { screen: 'home' });
+  assert.equal(allocations, 0, '底图不占用首页启动时间');
+  const state = new GameSimulation(MVP_LEVELS[0], 5).getState();
+  context.operations.length = 0;
+  renderer.render(state, MVP_LEVELS[0]);
+  assert.equal(allocations, 1);
+  assert.equal(backgroundCanvas.width, 1334);
+  assert.equal(backgroundCanvas.height, 750);
+  assert.ok(cachedContext.operations.length > 200);
+  assert.deepEqual(context.operations.find(([name]) => name === 'drawImage'),
+    ['drawImage', backgroundCanvas, 0, 0, 1334, 750, 0, 0, 667, 375]);
+  const cachedCommands = cachedContext.operations.length;
+  const firstFrame = [...context.operations];
+  context.operations.length = 0;
+  state.doors[0].open = !state.doors[0].open;
+  state.doors[0].occupancy = 3;
+  state.elapsed += 0.5;
+  renderer.render(state, MVP_LEVELS[0]);
+  assert.equal(allocations, 1);
+  assert.equal(cachedContext.operations.length, cachedCommands);
+  assert.notDeepEqual(context.operations, firstFrame, '动态层仍随车门状态变化');
+  renderer.destroy();
+  assert.equal(backgroundCanvas.width, 1);
+  assert.equal(backgroundCanvas.height, 1);
+});
+
+test('底图缓存按视口、DPR、安全区、主题和几何更新，相同内容的关卡对象可复用', () => {
+  const context = new MockContext(); const cachedContext = new MockContext();
+  const canvas = makeCanvas(context); const backgroundCanvas = makeCanvas(cachedContext);
+  let allocations = 0;
+  const renderer = GameRenderer.fromCanvas(canvas, 667, 375, 1, {}, MVP_LEVELS[0], {
+    canvasFactory: () => { allocations++; return backgroundCanvas; },
+  });
+  const level = structuredClone(MVP_LEVELS[0]);
+  const state = new GameSimulation(level, 7).getState();
+  renderer.render(state, level);
+  let commands = cachedContext.operations.length;
+  renderer.render(state, structuredClone(level));
+  assert.equal(cachedContext.operations.length, commands);
+  for (const change of [
+    () => { level.carriageTheme = level.carriageTheme === 'seafoam' ? 'pearl' : 'seafoam'; },
+    () => { level.id = 'another-station'; },
+    () => { level.trainBounds.height += 20; },
+    () => { level.platformBounds.width += 30; },
+    () => renderer.resize(740, 375, 1),
+    () => renderer.resize(740, 375, 2),
+    () => renderer.resize(740, 375, 2, { left: 30 }),
+    () => renderer.resize(375, 740, 2, { top: 30 }),
+  ]) {
+    change(); renderer.render(state, level);
+    assert.ok(cachedContext.operations.length > commands);
+    commands = cachedContext.operations.length;
+    renderer.render(state, level);
+    assert.equal(cachedContext.operations.length, commands);
+  }
+  assert.equal(allocations, 1, '始终复用一张底图画布');
+  renderer.destroy();
+});
+
+test('离屏背景与直接背景提交相同的场景绘制指令', () => {
+  const level = MVP_LEVELS[0];
+  const directContext = new MockContext(); const targetContext = new MockContext();
+  const cachedContext = new MockContext(); const backgroundCanvas = makeCanvas(cachedContext);
+  const metrics = createViewportMetrics(667, 375, 2, { left: 20, bottom: 10 });
+  const world = { x: 0, y: -300, width: 320, height: 868 };
+  const direct = new RenderContext(directContext, metrics, world);
+  const target = new RenderContext(targetContext, metrics, world);
+  configureCanvas(makeCanvas(directContext), directContext, metrics);
+  direct.clear('#0b1627'); renderStationBackground(direct, level);
+  const cache = new StationBackgroundCache(() => backgroundCanvas);
+  assert.equal(cache.draw(target, level), true);
+  assert.deepEqual(cachedContext.operations, directContext.operations);
+  cache.destroy();
+});
+
+test('小数 DPR 的底图回贴按物理像素对齐，先清空整张画布再合成', () => {
+  const context = new MockContext(); const cachedContext = new MockContext();
+  const canvas = makeCanvas(cachedContext);
+  const viewport = createViewportMetrics(375, 667, 1.5);
+  const target = new RenderContext(context, viewport, { x: 0, y: -300, width: 320, height: 868 });
+  const cache = new StationBackgroundCache(() => canvas);
+  assert.equal(cache.draw(target, MVP_LEVELS[0]), true);
+  assert.deepEqual(context.operations, [
+    ['clearRect', 0, 0, 563 / 1.5, 1001 / 1.5],
+    ['drawImage', canvas, 0, 0, 563, 1001, 0, 0, 563 / 1.5, 1001 / 1.5],
+  ]);
+  cache.destroy();
+});
+
+test('离屏创建、上下文或合成失败自动回退且不逐帧重试，不修改主画布尺寸', () => {
+  for (const failure of ['factory', 'context', 'draw', 'screen']) {
+    const context = new MockContext(); const canvas = makeCanvas(context);
+    const backgroundContext = new MockContext();
+    let calls = 0;
+    const renderer = GameRenderer.fromCanvas(canvas, 667, 375, 2, {}, MVP_LEVELS[0], {
+      canvasFactory: () => {
+        calls++;
+        if (failure === 'factory') throw Error('unsupported');
+        if (failure === 'screen') return canvas;
+        if (failure === 'context') return { width: 0, height: 0, getContext: () => null };
+        return makeCanvas(backgroundContext);
+      },
+    });
+    if (failure === 'draw') context.drawImage = () => { throw Error('unsupported'); };
+    const state = new GameSimulation(MVP_LEVELS[0], 9).getState();
+    for (let i = 0; i < 2; i++) {
+      context.operations.length = 0;
+      assert.doesNotThrow(() => renderer.render(state, MVP_LEVELS[0]));
+      assert.ok(context.operations.length > 200, failure);
+    }
+    assert.equal(calls, 1, failure);
+    renderer.destroy();
+    assert.equal(canvas.width, 1334);
+    assert.equal(canvas.height, 750);
+  }
 });

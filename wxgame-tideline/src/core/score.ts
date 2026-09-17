@@ -46,7 +46,7 @@ export function calculateCourtesyScore(state: GameState): number {
   return scoreNumber(Math.max(10, 100 - collisionPenalty - alightingPenalty + guideBonus));
 }
 
-/** 根据可解释的四项指标计算结算分，不依赖渲染或平台状态。 */
+/** 根据效率、礼让和体力三项指标计算结算分，不依赖渲染或平台状态。 */
 export function calculateScore(state: GameState, level?: LevelConfig): ScoreResult {
   let config = level;
   if (!config) {
@@ -60,12 +60,12 @@ export function calculateScore(state: GameState, level?: LevelConfig): ScoreResu
     }
   }
   const metrics = state.metrics;
-  const boardingRatio = metrics.boardingTotal === 0 ? 1 : metrics.boarded / metrics.boardingTotal;
 
+  // 效率只取玩家上车时间分，不受 NPC 上车率或受阻次数影响。
   const timeFactor = state.outcome === 'success'
     ? 45 + (metrics.doorRemainingAtFinish / Math.max(config.boardingDuration, 0.001)) * 55
     : 20;
-  const efficiency = scoreNumber(timeFactor * 0.65 + boardingRatio * 35 - metrics.lateBoardingAttempts * 4);
+  const efficiency = scoreNumber(timeFactor);
 
   const courtesy = calculateCourtesyScore(state);
 

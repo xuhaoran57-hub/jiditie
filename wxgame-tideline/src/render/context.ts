@@ -202,8 +202,11 @@ export function configureCanvas(
   context: Canvas2DContextLike,
   metrics: ViewportMetrics,
 ): void {
-  canvas.width = Math.max(1, Math.round(metrics.width * metrics.dpr));
-  canvas.height = Math.max(1, Math.round(metrics.height * metrics.dpr));
+  // 重设相同尺寸也会清空画布并重置状态；适配器和渲染器共用画布时避免重复分配。
+  const width = Math.max(1, Math.round(metrics.width * metrics.dpr));
+  const height = Math.max(1, Math.round(metrics.height * metrics.dpr));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
   context.setTransform?.(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
 }
 
