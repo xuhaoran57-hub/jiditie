@@ -1,15 +1,16 @@
 import type { CanvasFactory } from './context.ts';
 import type { PlayerSpriteAsset } from './player-sprite.ts';
+import { hasPlayerAccessory, paintPlayerAccessory } from './player-accessory.ts';
 
 const PALETTES = {
   default: { shirt: '#36c8bb', shadow: '#167c83', highlight: '#d9fff5' },
   seafoam: { shirt: '#8aefb8', shadow: '#39986c', highlight: '#e4fff0' },
   sunset: { shirt: '#ff9a58', shadow: '#b65b36', highlight: '#fff0d5' },
   night: { shirt: '#7799ff', shadow: '#3a5199', highlight: '#e6edff' },
-  endless5: { shirt: '#b9d5e8', shadow: '#54758d', highlight: '#f0fbff' },
-  endless10: { shirt: '#8ed8d1', shadow: '#347d83', highlight: '#e4fffb' },
-  endless15: { shirt: '#f3c85b', shadow: '#a36c2c', highlight: '#fff5c9' },
-  endless20: { shirt: '#d8e7ff', shadow: '#6178b1', highlight: '#ffffff' },
+  endless5: { shirt: '#9dbdd1', shadow: '#526f87', highlight: '#e0eff4' },
+  endless10: { shirt: '#70bbb0', shadow: '#376f76', highlight: '#d5eee2' },
+  endless15: { shirt: '#c4a065', shadow: '#796345', highlight: '#f1d99c' },
+  endless20: { shirt: '#92aacd', shadow: '#506485', highlight: '#e6eff8' },
 } as const;
 
 export function playerAppearancePalette(id: string) {
@@ -63,7 +64,18 @@ export class PlayerAppearanceSprites {
           const pixels = ctx.getImageData(0, 0, 256, 64);
           recolorPlayerPixels(pixels.data, appearanceId);
           ctx.putImageData(pixels, 0, 0);
-          result = { ...source, image: canvas };
+          let accessoryId: string | undefined;
+          if (hasPlayerAccessory(appearanceId) && typeof ctx.save === 'function' && typeof ctx.beginPath === 'function') {
+            source.frames.forEach((frame, index) => {
+              ctx.save();
+              ctx.translate(frame.sx + frame.width / 2, frame.sy + frame.height / 2);
+              ctx.scale(frame.width / 64, frame.height / 64);
+              paintPlayerAccessory(ctx, appearanceId, index);
+              ctx.restore();
+            });
+            accessoryId = appearanceId;
+          }
+          result = { ...source, image: canvas, accessoryId };
         }
       }
     } catch {

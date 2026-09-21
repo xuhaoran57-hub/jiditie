@@ -72,6 +72,79 @@ test('endless appearances keep the pixel sprite and use distinct palettes', () =
   assert.equal(sprites.get(source, 'default'), source);
 });
 
+test('endless accessories are composed into every animation frame once without changing the source', () => {
+  const originalPixels = new Uint8ClampedArray([54, 200, 187, 255, 243, 197, 162, 255]);
+  const image = Object.freeze({ width: 256, height: 64 });
+  const source = Object.freeze({ image, frames: PLAYER_SPRITE_FRAMES, frameDuration: 0.1, ready: true, failed: false });
+  const originalFrames = structuredClone(source.frames);
+
+  for (const id of ['endless5', 'endless10', 'endless15', 'endless20']) {
+    let allocations = 0, imageReads = 0, pixelReads = 0, pixelWrites = 0;
+    let transform = { x: 0, y: 0, sx: 1, sy: 1 };
+    const stack = [], fills = [];
+    let path = [];
+    const context = {
+      drawImage(value) { assert.equal(value, image); imageReads++; },
+      getImageData() { pixelReads++; return { data: originalPixels.slice(), width: 2, height: 1 }; },
+      putImageData() { pixelWrites++; },
+      save() { stack.push({ ...transform }); },
+      restore() { transform = stack.pop(); },
+      translate(x, y) { transform.x += x * transform.sx; transform.y += y * transform.sy; },
+      scale(x, y) { transform.sx *= x; transform.sy *= y; },
+      beginPath() { path = []; },
+      moveTo(x, y) { path.push([transform.x + x * transform.sx, transform.y + y * transform.sy]); },
+      lineTo(x, y) { this.moveTo(x, y); },
+      closePath() {},
+      fill() { fills.push([...path]); },
+      stroke() {},
+    };
+    const canvas = { width: 0, height: 0, getContext: () => context };
+    const sprites = new PlayerAppearanceSprites(() => { allocations++; return canvas; });
+    const composed = sprites.get(source, id);
+    assert.ok(composed, id);
+    assert.equal(composed.accessoryId, id);
+    assert.equal(composed.frames, source.frames);
+    assert.equal(composed.frameDuration, source.frameDuration);
+    assert.notEqual(composed.image, source.image);
+    for (const frame of source.frames) {
+      assert.ok(fills.some((points) => points.length > 0 && points.every(([x, y]) =>
+        x >= frame.sx && x <= frame.sx + frame.width && y >= frame.sy && y <= frame.sy + frame.height)),
+      `${id} decorates the frame at ${frame.sx}`);
+    }
+    const paintedShapes = fills.length;
+    for (let frame = 0; frame < 12; frame++) assert.equal(sprites.get(source, id), composed);
+    assert.deepEqual([allocations, imageReads, pixelReads, pixelWrites], [1, 1, 1, 1]);
+    assert.equal(fills.length, paintedShapes, 'rendering later frames must reuse the decorated atlas');
+    assert.equal(stack.length, 0);
+  }
+  assert.deepEqual(originalPixels, new Uint8ClampedArray([54, 200, 187, 255, 243, 197, 162, 255]));
+  assert.deepEqual(source.frames, originalFrames);
+  assert.equal(source.accessoryId, undefined);
+});
+
+test('accessory composition errors discard the partial atlas and are not retried every frame', () => {
+  const source = Object.freeze({ image: {}, frames: PLAYER_SPRITE_FRAMES, frameDuration: 0.1, ready: true, failed: false });
+  let allocations = 0, strokes = 0;
+  const sprites = new PlayerAppearanceSprites(() => {
+    allocations++;
+    return { width: 0, height: 0, getContext: () => ({
+      drawImage() {},
+      getImageData: () => ({ data: new Uint8ClampedArray([54, 200, 187, 255]), width: 1, height: 1 }),
+      putImageData() {},
+      save() {}, restore() {}, translate() {}, scale() {},
+      beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, fill() {},
+      stroke() { strokes++; throw new Error('offscreen stroke unsupported'); },
+    }) };
+  });
+  assert.equal(sprites.get(source, 'endless15'), undefined, 'a partially decorated atlas must not be displayed');
+  assert.equal(strokes, 1, 'the failure occurs while composing accessories after recoloring');
+  for (let frame = 0; frame < 12; frame++) assert.equal(sprites.get(source, 'endless15'), undefined);
+  assert.equal(allocations, 1);
+  assert.equal(strokes, 1);
+  assert.equal(source.accessoryId, undefined);
+  assert.equal(sprites.get(source, 'default'), source);
+});
+
 test('外观预览卡片在窄横屏和竖屏安全区内完整排列且不重叠', () => {
   for (const [width, height] of [[480, 320], [667, 375], [375, 667]]) {
     const viewport = createViewportMetrics(width, height, 2, { left: 10, right: 10, top: 8, bottom: 12 });

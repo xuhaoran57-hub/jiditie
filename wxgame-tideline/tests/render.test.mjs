@@ -4,6 +4,7 @@ import { APPEARANCE_OPTIONS } from '../src/core/appearance.ts';
 import { readFileSync } from 'node:fs';
 import { drawPlayerPreview } from '../src/render/actor-renderer.ts';
 import { playerAppearancePalette } from '../src/render/player-appearance.ts';
+import { PLAYER_SPRITE_FRAMES } from '../src/render/player-sprite.ts';
 import { StationBackgroundCache } from '../src/render/station-background.ts';
 import { renderStationBackground, renderStationForeground } from '../src/render/station-renderer.ts';
 
@@ -587,6 +588,106 @@ test('外观预览图片缺失时使用对应配色的人物而非原色占位',
     const renderContext = new RenderContext(context, createViewportMetrics(480, 320), { x: 0, y: 0, width: 320, height: 568 });
     drawPlayerPreview(renderContext, id, undefined, 50, 50, 64);
     assert.ok(colors.includes(playerAppearancePalette(id).shirt));
+  }
+});
+
+test('composed appearance sprites draw their selected frame without a second accessory layer in preview or gameplay', () => {
+  const level = MVP_LEVELS[0];
+  const state = new GameSimulation(level, 2026).getState();
+  state.passengers = [];
+  state.player.velocity = { x: 12, y: 0 };
+  state.elapsed = 0.2;
+  const image = {};
+  const paintedOperations = (context) => context.operations.filter(([name]) =>
+    ['fill', 'stroke', 'fillRect', 'strokeRect'].includes(name));
+  const drawGame = (id, sprite) => {
+    const context = new MockContext();
+    const renderContext = new RenderContext(context, createViewportMetrics(480, 320), { x: 0, y: -300, width: 320, height: 868 });
+    renderActors(renderContext, state, level, sprite, undefined, undefined, undefined, id);
+    return context;
+  };
+
+  for (const id of ['endless5', 'endless10', 'endless15', 'endless20']) {
+    const sprite = { image, frames: PLAYER_SPRITE_FRAMES, frameDuration: 0.1, ready: true, failed: false, accessoryId: id };
+    for (let frame = 0; frame < PLAYER_SPRITE_FRAMES.length; frame++) {
+      const context = new MockContext();
+      const renderContext = new RenderContext(context, createViewportMetrics(480, 320), { x: 0, y: 0, width: 320, height: 568 });
+      drawPlayerPreview(renderContext, id, sprite, 50, 50, 24, frame);
+      const images = context.operations.filter(([name]) => name === 'drawImage');
+      assert.equal(images.length, 1);
+      assert.equal(images[0][1], image);
+      assert.equal(images[0][2], PLAYER_SPRITE_FRAMES[frame].sx);
+      assert.equal(paintedOperations(context).length, 0, `${id} frame ${frame} is already decorated`);
+    }
+    const composed = drawGame(id, sprite);
+    const undecorated = drawGame(id, { ...sprite, accessoryId: undefined });
+    const plain = drawGame('night', sprite);
+    assert.equal(composed.operations.filter(([name]) => name === 'drawImage').length, 1);
+    assert.equal(paintedOperations(composed).length, paintedOperations(plain).length,
+      `${id} retains the ordinary gameplay effects without extra accessory drawing`);
+    assert.ok(paintedOperations(undecorated).length > paintedOperations(composed).length,
+      'an atlas without composed accessories still receives its accessory layer');
+  }
+});
+
+test('missing, loading, failed and undecodable appearance sprites preserve the geometric accessories', () => {
+  const level = MVP_LEVELS[0];
+  const state = new GameSimulation(level, 2026).getState();
+  state.passengers = [];
+  const paintCount = (context) => context.operations.filter(([name]) => ['fill', 'stroke', 'fillRect'].includes(name)).length;
+  for (const surface of ['preview', 'gameplay']) {
+    const render = (id, failure) => {
+      const context = new MockContext();
+      if (failure === 'decode') context.drawImage = () => { throw new Error('image cannot be decoded'); };
+      const renderContext = new RenderContext(context, createViewportMetrics(480, 320), { x: 0, y: -300, width: 320, height: 868 });
+      const sprite = failure === 'missing' ? undefined : {
+        image: {}, frames: PLAYER_SPRITE_FRAMES, frameDuration: 0.1,
+        ready: failure !== 'loading', failed: failure === 'failed', accessoryId: id,
+      };
+      if (surface === 'preview') drawPlayerPreview(renderContext, id, sprite, 50, 50, 24);
+      else renderActors(renderContext, state, level, sprite, undefined, undefined, undefined, id);
+      return context;
+    };
+    const plain = paintCount(render('night', 'missing'));
+    for (const id of ['endless5', 'endless10', 'endless15', 'endless20']) {
+      const missing = paintCount(render(id, 'missing'));
+      assert.ok(missing > plain, `${surface} keeps ${id} accessories when the image is missing`);
+      for (const failure of ['loading', 'failed', 'decode']) {
+        assert.equal(paintCount(render(id, failure)), missing,
+          `${surface} keeps ${id} accessories after ${failure}, even with the composed marker`);
+      }
+    }
+  }
+});
+
+test('small appearance previews scale their accessories with the requested sprite size', () => {
+  const sprite = { image: {}, frames: PLAYER_SPRITE_FRAMES, frameDuration: 0.1, ready: true, failed: false };
+  const accessoryBounds = (id, size) => {
+    const context = new MockContext();
+    const renderContext = new RenderContext(context, createViewportMetrics(480, 320), { x: 0, y: 0, width: 320, height: 568 });
+    drawPlayerPreview(renderContext, id, sprite, 50, 50, size);
+    const points = [], stack = [];
+    let transform = { x: 0, y: 0, sx: 1, sy: 1 };
+    for (const [name, x, y] of context.operations) {
+      if (name === 'save') stack.push({ ...transform });
+      else if (name === 'restore') transform = stack.pop();
+      else if (name === 'translate') { transform.x += x * transform.sx; transform.y += y * transform.sy; }
+      else if (name === 'scale') { transform.sx *= x; transform.sy *= y; }
+      else if (name === 'moveTo' || name === 'lineTo') points.push([transform.x + x * transform.sx, transform.y + y * transform.sy]);
+    }
+    assert.ok(points.length > 0, `${id} has visible accessory artwork`);
+    return {
+      width: Math.max(...points.map(([x]) => x)) - Math.min(...points.map(([x]) => x)),
+      height: Math.max(...points.map(([, y]) => y)) - Math.min(...points.map(([, y]) => y)),
+    };
+  };
+  for (const id of ['endless5', 'endless10', 'endless15', 'endless20']) {
+    const full = accessoryBounds(id, 64);
+    for (const size of [16, 24, 32]) {
+      const small = accessoryBounds(id, size);
+      assertClose(small.width, full.width * size / 64);
+      assertClose(small.height, full.height * size / 64);
+    }
   }
 });
 

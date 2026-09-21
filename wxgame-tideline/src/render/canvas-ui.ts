@@ -903,14 +903,17 @@ export function renderAppearancePage(renderContext: RenderContext, appearanceId:
       const unlocked = unlockedAppearanceIds.includes(id);
       fillRoundRect(ctx, card.x, card.y, card.width, card.height, 12, UI.panel);
       strokeRoundRect(ctx, card.x, card.y, card.width, card.height, 12, id === appearanceId ? UI.accent : '#30415c', id === appearanceId ? 2 : 1);
-      const previewSize = Math.min(76, card.height - 12);
+      // The atlas already includes transparent top/bottom margins; use the card
+      // height so hats and collars remain readable on compact landscape screens.
+      const previewSize = Math.max(1, Math.min(76, card.height - 4));
       drawPlayerPreview(renderContext, id, spriteFor?.(id), card.x + 42, card.y + card.height / 2, previewSize);
+      const compact = card.height < 50;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.font = canvasFont(600, 14);
+      ctx.font = canvasFont(600, compact ? 12 : 14);
       ctx.fillStyle = UI.text;
       ctx.fillText(label, card.x + 84, card.y + card.height * 0.3, card.width - 94);
-      ctx.font = canvasFont(400, 10);
+      ctx.font = canvasFont(400, compact ? 8 : 10);
       ctx.fillStyle = unlocked ? UI.muted : UI.warning;
       ctx.fillText(condition, card.x + 84, card.y + card.height * 0.55, card.width - 94);
       ctx.fillText(unlocked ? (id === appearanceId ? '已使用' : '点击使用') : '未解锁', card.x + 84, card.y + card.height * 0.8, card.width - 94);

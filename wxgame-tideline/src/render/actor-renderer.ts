@@ -4,6 +4,7 @@ import { fillRoundRect, RenderContext, strokeRoundRect } from './context.ts';
 import { TIDELINE_TOKENS } from './design-tokens.ts';
 import type { PlayerSpriteAsset } from './player-sprite.ts';
 import { playerAppearancePalette } from './player-appearance.ts';
+import { hasPlayerAccessory, paintPlayerAccessory } from './player-accessory.ts';
 import { passengerSpriteFrame, type PassengerSpriteAsset } from './passenger-sprite.ts';
 
 interface CharacterPalette {
@@ -283,53 +284,14 @@ function drawPlayerSprite(
   }
 }
 
-/**
- * Pixel-art accessory layers for the endless skins. They are drawn as crisp
- * rectangles over the shared PNG sprite so each skin keeps the original
- * animation and silhouette while gaining a distinct identity.
- */
-export function drawPlayerAccessory(context: RenderContext, appearanceId: string, size: number): void {
-  if (!appearanceId.startsWith('endless')) return;
+/** Used only when an atlas has no baked accessories, or for Canvas geometry. */
+export function drawPlayerAccessory(context: RenderContext, appearanceId: string, size: number, frameIndex = 0, geometry = false): void {
+  if (!hasPlayerAccessory(appearanceId)) return;
   const { ctx } = context;
-  const unit = Math.max(0.5, size / 64);
-  const pixel = (x: number, y: number, width: number, height: number, color: string) => {
-    ctx.fillStyle = color;
-    ctx.fillRect(Math.round(x * unit), Math.round(y * unit), Math.max(1, Math.round(width * unit)), Math.max(1, Math.round(height * unit)));
-  };
-
-  if (appearanceId === 'endless5') {
-    // Reflective inspector cap and vest stripes.
-    pixel(-10, -23, 20, 3, '#d8e7f0');
-    pixel(-7, -26, 14, 3, '#f3fbff');
-    pixel(-13, -19, 26, 2, '#54758d');
-    pixel(-13, 3, 3, 11, '#d8e7f0');
-    pixel(10, 3, 3, 11, '#d8e7f0');
-    pixel(-10, 7, 20, 2, '#f3fbff');
-  } else if (appearanceId === 'endless10') {
-    // Tide visor and compact ear pieces.
-    pixel(-12, -18, 24, 3, '#347d83');
-    pixel(-9, -20, 18, 2, '#e4fffb');
-    pixel(-13, -15, 3, 5, '#8ed8d1');
-    pixel(10, -15, 3, 5, '#8ed8d1');
-    pixel(-9, 8, 18, 2, '#8ed8d1');
-  } else if (appearanceId === 'endless15') {
-    // Gold conductor cap and shoulder sash.
-    pixel(-11, -23, 22, 3, '#a36c2c');
-    pixel(-8, -27, 16, 4, '#f3c85b');
-    pixel(-14, -19, 28, 2, '#fff5c9');
-    pixel(-12, 3, 4, 3, '#f3c85b');
-    pixel(8, 6, 4, 3, '#f3c85b');
-    pixel(9, 3, 3, 3, '#fff5c9');
-  } else if (appearanceId === 'endless20') {
-    // Star-ring halo and terminal badge.
-    pixel(-14, -22, 4, 2, '#d8e7ff');
-    pixel(10, -22, 4, 2, '#d8e7ff');
-    pixel(-17, -18, 3, 5, '#6178b1');
-    pixel(14, -18, 3, 5, '#6178b1');
-    pixel(-2, -27, 4, 3, '#ffffff');
-    pixel(-3, 9, 6, 4, '#d8e7ff');
-    pixel(-1, 8, 2, 6, '#ffffff');
-  }
+  ctx.save();
+  ctx.scale(size / 64, size / 64);
+  paintPlayerAccessory(ctx, appearanceId, frameIndex, geometry);
+  ctx.restore();
 }
 
 function drawPassengerSprite(
@@ -1019,12 +981,6 @@ function drawPassenger(
 function drawPlayerBody(context: RenderContext, appearanceId: string, stride = 0, guideLift = 0): void {
   const { ctx } = context;
   const palette = playerAppearancePalette(appearanceId);
-  if (appearanceId.startsWith('endless')) {
-    ctx.fillStyle = appearanceId === 'endless20' ? '#d8e7ff' : appearanceId === 'endless15' ? '#f3c85b' : '#b9d5e8';
-    ctx.beginPath();
-    ctx.moveTo(-7, -4); ctx.lineTo(0, -11); ctx.lineTo(7, -4); ctx.lineTo(5, 1); ctx.lineTo(-5, 1); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = palette.highlight; ctx.lineWidth = 1.5; ctx.stroke();
-  }
   // 玩家专属背包、靴子和当前外观配色的外套。
   fillRoundRect(ctx, -8, -1, 5, 12, 2, '#28445a');
   ctx.strokeStyle = palette.shirt;
@@ -1083,25 +1039,25 @@ function drawPlayerBody(context: RenderContext, appearanceId: string, stride = 0
   fillRoundRect(ctx, 2.7, 0.5, 4.3, 5.2, 1, '#f5cb66');
   ctx.fillStyle = '#fff4c6';
   ctx.fillRect(3.5, 1.3, 2.7, 1.2);
-  if (appearanceId === 'endless10' || appearanceId === 'endless20') {
-    ctx.strokeStyle = palette.highlight; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(0, -7.5, 6.8, Math.PI, Math.PI * 2); ctx.stroke();
-  }
 }
 
 /** 屏幕坐标预览复用游戏内 Sprite 和几何回退，不应用世界缩放。 */
-export function drawPlayerPreview(context: RenderContext, appearanceId: string, sprite: PlayerSpriteAsset | undefined, x: number, y: number, size: number): void {
+export function drawPlayerPreview(context: RenderContext, appearanceId: string, sprite: PlayerSpriteAsset | undefined, x: number, y: number, size: number, frameIndex = 0): void {
   const { ctx } = context;
   ctx.save();
   ctx.translate(x, y);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  if (!sprite || !drawPlayerSprite(context, sprite, 0, size)) {
+  const spriteDrawn = sprite ? drawPlayerSprite(context, sprite, frameIndex, size) : false;
+  if (!spriteDrawn) {
     ctx.save();
     ctx.scale(size / 32, size / 32);
     drawPlayerBody(context, appearanceId);
     ctx.restore();
   }
-  drawPlayerAccessory(context, appearanceId, size);
+  if (!spriteDrawn || sprite?.accessoryId !== appearanceId) {
+    drawPlayerAccessory(context, appearanceId, size, frameIndex, !spriteDrawn);
+  }
   ctx.restore();
 }
 
@@ -1172,7 +1128,9 @@ function drawPlayer(
   if (!spriteDrawn) {
     drawPlayerBody(context, appearanceId, stride, guideStrength > 0 ? 2 + Math.sin(state.elapsed * 18) * 1.5 : 0);
   }
-  drawPlayerAccessory(context, appearanceId, spriteSize);
+  if (!spriteDrawn || playerSprite?.accessoryId !== appearanceId) {
+    drawPlayerAccessory(context, appearanceId, spriteDrawn ? spriteSize : 32, spriteFrame, !spriteDrawn);
+  }
   ctx.restore();
 
   // 朝向箭头从身体外伸出，安全区时再叠一圈柔和的反馈。

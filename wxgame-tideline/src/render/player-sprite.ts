@@ -12,6 +12,8 @@ export interface PlayerSpriteAsset {
   readonly image: CanvasImageLike;
   readonly frames: readonly PlayerSpriteFrame[];
   readonly frameDuration: number;
+  /** Accessories already composited into this atlas; prevents a second overlay. */
+  readonly accessoryId?: string;
   ready: boolean;
   failed: boolean;
 }
