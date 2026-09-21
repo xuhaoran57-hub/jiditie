@@ -398,6 +398,7 @@ export class GameRuntime {
       {
         onPause: () => this.handleLifecyclePause(),
         onResume: () => this.handleLifecycleResume(),
+        onShow: () => this.handleLifecycleShow(),
       },
     );
     this.diagnostics = options.diagnostics ?? createWxDiagnostics(
@@ -577,18 +578,18 @@ export class GameRuntime {
     return this.tick(frameDelta);
   }
 
-  resize(): void {
+  resize(force = false, renderAfter = true): void {
     const previous = this.renderer.context.layout.viewport;
     const canvas = this.canvasAdapter?.canvas;
     const canvasChanged = canvas && (canvas.width !== Math.round(previous.width * previous.dpr)
       || canvas.height !== Math.round(previous.height * previous.dpr));
     const viewport = this.canvasAdapter?.refresh() ?? this.renderer.context.layout.viewport;
-    if (!canvasChanged && viewport.width === previous.width && viewport.height === previous.height
+    if (!force && !canvasChanged && viewport.width === previous.width && viewport.height === previous.height
       && viewport.dpr === previous.dpr
       && viewport.insets.top === previous.insets.top && viewport.insets.right === previous.insets.right
       && viewport.insets.bottom === previous.insets.bottom && viewport.insets.left === previous.insets.left) return;
     this.renderer.resize(viewport.width, viewport.height, viewport.dpr, viewport.insets);
-    this.render();
+    if (renderAfter) this.render();
   }
 
   /** 选择一个已解锁关卡，先展示三星目标，确认后才开始。 */
@@ -1137,6 +1138,21 @@ export class GameRuntime {
     this.lifecyclePaused = false;
     this.lastFrameTimestamp = undefined;
     if (!this.storageWritable) this.persistProgress();
+    // Sharing can reset the backing canvas to its default surface/size while
+    // the game is hidden. Reapply DPR and safe-area sizing before drawing.
+    this.resize(true, false);
+    const requestId = this.share.onShow();
+    if (requestId && this.rewardRequest?.id === requestId) this.claimShare();
+    this.syncLoopPause();
+    if (this.runningValue) {
+      this.render();
+      this.scheduleFrame();
+    }
+  }
+
+  private handleLifecycleShow(): void {
+    this.lastFrameTimestamp = undefined;
+    this.resize(true, false);
     const requestId = this.share.onShow();
     if (requestId && this.rewardRequest?.id === requestId) this.claimShare();
     this.syncLoopPause();

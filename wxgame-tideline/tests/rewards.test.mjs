@@ -39,6 +39,40 @@ test('分享参与奖励可自选，普通切后台不发，取消后返回与�
   h.tap('claim-share'); assert.equal(h.runtime.saveData.items.inventory['commute-horn'], 2);
   assert.equal(h.runtime.getItemUi().status, 'granted'); h.runtime.destroy();
 });
+
+test('分享返回时恢复 Canvas 物理尺寸并重绘，避免黑屏', async () => {
+  const h = createHarness(); h.tap('close');
+  h.runtime.openSupply('delay-ticket');
+  await h.runtime.requestReward('share-participation');
+  const canvas = h.runtime.canvasAdapter.canvas;
+  h.listeners.Hide();
+  h.context.frameOperations = [];
+  canvas.width = 300;
+  canvas.height = 150;
+  h.wx.getWindowInfo = () => ({ windowWidth: 667, windowHeight: 375, pixelRatio: 2 });
+  h.listeners.Show();
+  assert.equal(canvas.width, 1334);
+  assert.equal(canvas.height, 750);
+  assert.equal(h.runtime.renderer.context.layout.viewport.dpr, 2);
+  assert.ok(h.context.frameOperations.length > 0, '分享返回后应提交一帧画面');
+  assert.equal(h.runtime.getItemUi().status, 'granted');
+  assert.equal(h.runtime.running, true);
+  h.runtime.destroy();
+});
+
+test('没有先收到 hide 的 show 事件也会刷新 Canvas', async () => {
+  const h = createHarness(); h.tap('close');
+  h.runtime.openSupply('delay-ticket');
+  await h.runtime.requestReward('share-participation');
+  h.context.frameOperations = [];
+  h.runtime.canvasAdapter.canvas.width = 300;
+  h.runtime.canvasAdapter.canvas.height = 150;
+  h.listeners.Show();
+  assert.equal(h.runtime.canvasAdapter.canvas.width, 667);
+  assert.equal(h.runtime.canvasAdapter.canvas.height, 375);
+  assert.ok(h.context.frameOperations.length > 0, '无 hide 的 show 也应提交一帧画面');
+  h.runtime.destroy();
+});
 test('广告完整观看发奖，所选道具在开始后冻结，过期监听不重复发', async () => {
   const h = createHarness(); h.tap('close'); h.runtime.openSupply('delay-ticket');
   const watch = h.runtime.requestReward('rewarded-ad');

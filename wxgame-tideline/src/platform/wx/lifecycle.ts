@@ -11,6 +11,8 @@ export interface WxLifecycleApi {
 export interface LifecycleHandlers {
   onPause?: () => void;
   onResume?: () => void;
+  /** Called for every show event, including show events that have no matching hide. */
+  onShow?: (options?: unknown) => void;
 }
 
 /**
@@ -23,8 +25,14 @@ export class WxLifecycleAdapter {
   private _attached = false;
   private _paused = false;
 
-  private readonly showListener: WxShowListener = () => {
-    if (this._attached) this.resume();
+  private readonly showListener: WxShowListener = (options) => {
+    if (!this._attached) return;
+    // Some share surfaces emit onShow without a preceding onHide. Keep the
+    // transition callback idempotent, but still notify the runtime so it can
+    // redraw a canvas whose backing surface was discarded by the host.
+    const wasPaused = this._paused;
+    this.resume();
+    if (!wasPaused) this.handlers.onShow?.(options);
   };
   private readonly hideListener: WxHideListener = () => {
     if (this._attached) this.pause();
