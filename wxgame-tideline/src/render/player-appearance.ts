@@ -48,6 +48,11 @@ export class PlayerAppearanceSprites {
     this.canvasFactory = canvasFactory;
   }
 
+  /** 原始图片可继续复用，宿主释放过的换色画布需按需重新生成。 */
+  clear(): void {
+    this.cache.clear();
+  }
+
   get(source: PlayerSpriteAsset | undefined, appearanceId: string): PlayerSpriteAsset | undefined {
     if (appearanceId === 'default' || !Object.prototype.hasOwnProperty.call(PALETTES, appearanceId)) return source;
     if (!source?.ready || source.failed) return undefined;

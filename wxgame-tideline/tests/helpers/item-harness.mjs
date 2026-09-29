@@ -47,7 +47,7 @@ export function createHarness(options = {}) {
     wx[`on${name}`] = (fn) => { listeners[name] = fn; };
     wx[`off${name}`] = () => { delete listeners[name]; };
   }
-  const runtime = new GameRuntime(wx, { rewardedAdUnitId: options.adUnitId ?? 'adunit-test', now: () => clock, levels: options.levels });
+  const runtime = new GameRuntime(wx, { rewardedAdUnitId: options.adUnitId ?? 'adunit-test', now: () => clock, levels: options.levels, scheduler: options.scheduler });
   runtime.start();
   return {
     runtime, wx, context, storage, writes, listeners, shares, ad, adClose,

@@ -890,6 +890,112 @@ test('站台背景缓存复用静态绘制，车门和人流仍逐帧绘制', ()
   assert.equal(backgroundCanvas.height, 1);
 });
 
+test('恢复 surface 在尺寸未变化时也重建屏幕画布，并在重置后恢复 DPR', () => {
+  const context = new MockContext();
+  const canvas = makeCanvas(context);
+  const writes = [];
+  for (const axis of ['width', 'height']) {
+    let value = 0;
+    Object.defineProperty(canvas, axis, {
+      get: () => value,
+      set(next) { value = next; writes.push([axis, next]); context.setTransform(1, 0, 0, 1, 0, 0); },
+    });
+  }
+  const renderer = GameRenderer.fromCanvas(canvas, 667, 375, 2, { left: 20 }, MVP_LEVELS[0]);
+  const layout = renderer.context.layout;
+  writes.length = 0;
+  context.operations.length = 0;
+  renderer.restoreSurface();
+  assert.deepEqual(writes, [['width', 1334], ['height', 750]]);
+  assert.deepEqual(context.operations.at(-1), ['setTransform', 2, 0, 0, 2, 0, 0]);
+  assert.equal(renderer.context.layout, layout, '恢复画布不改变视口、安全区或触摸布局');
+  renderer.destroy();
+});
+
+test('宿主丢弃离屏像素后恢复背景和换色外观，随后继续使用缓存且不重载图片', () => {
+  function makeDiscardableCanvas() {
+    const context = new MockContext();
+    const canvas = makeCanvas(context);
+    canvas.hasPixels = false;
+    const samples = [];
+    const fillRect = context.fillRect.bind(context);
+    context.fillRect = (...args) => { canvas.hasPixels = true; fillRect(...args); };
+    const clearRect = context.clearRect.bind(context);
+    context.clearRect = (...args) => { canvas.hasPixels = false; clearRect(...args); };
+    const drawImage = context.drawImage.bind(context);
+    context.drawImage = (image, ...args) => {
+      samples.push({ image, hasPixels: image.hasPixels });
+      canvas.hasPixels ||= image.hasPixels === true;
+      drawImage(image, ...args);
+    };
+    context.getImageData = () => ({ width: 1, height: 1, data: new Uint8ClampedArray(
+      canvas.hasPixels ? [54, 200, 187, 255] : [0, 0, 0, 0],
+    ) });
+    context.putImageData = (pixels) => { canvas.hasPixels = pixels.data[3] > 0; };
+    return { canvas, context, samples };
+  }
+
+  for (const ownsScreenCanvas of [true, false]) {
+    const screen = makeDiscardableCanvas();
+    const offscreens = [];
+    let imagesCreated = 0;
+    const playerSprite = { image: { hasPixels: true }, frames: PLAYER_SPRITE_FRAMES,
+      frameDuration: 0.1, ready: true, failed: false };
+    const assets = {
+      playerSprite,
+      imageFactory: () => { imagesCreated++; return { width: 0, height: 0, src: '' }; },
+      canvasFactory: () => {
+        const surface = makeDiscardableCanvas(); offscreens.push(surface); return surface.canvas;
+      },
+    };
+    const level = MVP_LEVELS[0];
+    const renderer = ownsScreenCanvas
+      ? GameRenderer.fromCanvas(screen.canvas, 667, 375, 2, {}, level, assets)
+      : new GameRenderer(new RenderContext(screen.context, createViewportMetrics(667, 375, 2),
+        { x: 0, y: -300, width: 320, height: 868 }), undefined, assets);
+    const state = new GameSimulation(level, 5).getState();
+    const draw = () => renderer.render(state, level, { appearanceId: 'sunset' });
+    draw();
+    assert.equal(offscreens.length, 2, '首次绘制生成背景与换色外观');
+    const [background, appearance] = offscreens;
+    assert.equal(background.canvas.hasPixels, true);
+    assert.equal(appearance.canvas.hasPixels, true);
+    const imagesBefore = imagesCreated;
+    const backgroundCommands = background.context.operations.length;
+
+    // 模拟微信宿主只丢弃像素；尺寸、JS 对象和缓存 key 均未变化。
+    background.canvas.hasPixels = false;
+    appearance.canvas.hasPixels = false;
+    screen.samples.length = 0;
+    draw();
+    assert.ok(screen.samples.some((sample) => sample.image === background.canvas && !sample.hasPixels));
+    assert.ok(screen.samples.some((sample) => sample.image === appearance.canvas && !sample.hasPixels));
+    assert.equal(background.context.operations.length, backgroundCommands);
+
+    assert.doesNotThrow(() => renderer.restoreSurface());
+    screen.samples.length = 0;
+    draw();
+    assert.equal(offscreens.length, 3, '只新增小外观图集，背景仍复用原来的大画布');
+    const restoredAppearance = offscreens[2];
+    assert.equal(background.canvas.hasPixels, true);
+    assert.equal(restoredAppearance.canvas.hasPixels, true);
+    assert.ok(background.context.operations.length > backgroundCommands);
+    assert.ok(screen.samples.some((sample) => sample.image === background.canvas && sample.hasPixels));
+    assert.ok(screen.samples.some((sample) => sample.image === restoredAppearance.canvas && sample.hasPixels));
+    assert.equal(screen.samples.some((sample) => sample.image === appearance.canvas), false);
+    assert.equal(renderer.playerSprite, playerSprite);
+    assert.equal(imagesCreated, imagesBefore, '原始图片无需重新加载');
+
+    const restoredBackgroundCommands = background.context.operations.length;
+    const restoredAppearanceCommands = restoredAppearance.context.operations.length;
+    for (let frame = 0; frame < 12; frame++) draw();
+    assert.equal(offscreens.length, 3);
+    assert.equal(background.context.operations.length, restoredBackgroundCommands);
+    assert.equal(restoredAppearance.context.operations.length, restoredAppearanceCommands);
+    renderer.destroy();
+  }
+});
+
 test('底图缓存按视口、DPR、安全区、主题和几何更新，相同内容的关卡对象可复用', () => {
   const context = new MockContext(); const cachedContext = new MockContext();
   const canvas = makeCanvas(context); const backgroundCanvas = makeCanvas(cachedContext);

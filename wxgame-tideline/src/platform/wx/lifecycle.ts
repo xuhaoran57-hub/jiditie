@@ -11,7 +11,7 @@ export interface WxLifecycleApi {
 export interface LifecycleHandlers {
   onPause?: () => void;
   onResume?: () => void;
-  /** Called for every show event, including show events that have no matching hide. */
+  /** A show with no paused-to-resumed transition still needs a surface refresh. */
   onShow?: (options?: unknown) => void;
 }
 

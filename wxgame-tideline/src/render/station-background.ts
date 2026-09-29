@@ -76,6 +76,11 @@ export class StationBackgroundCache {
     }
   }
 
+  /** 保留离屏画布分配，在下次绘制时重新填充被宿主丢弃的内容。 */
+  invalidate(): void {
+    this.layout = undefined;
+  }
+
   destroy(): void {
     if (this.canvas) {
       try { this.canvas.width = 1; this.canvas.height = 1; } catch { /* 宿主可能已释放画布。 */ }

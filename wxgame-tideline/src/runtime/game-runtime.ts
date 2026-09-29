@@ -166,6 +166,9 @@ export type StartupStage = 'modulesReady' | 'runtimeStarted' | 'canvasReady' | '
   | 'runtimeReady' | 'homeSubmitted' | 'preloadsStarted';
 
 const DEFAULT_SEED: number | string = 1;
+// Surface restoration may finish after onShow. Redraw across actual frames and
+// a bounded timer window (100 / 350 / 1000ms), without keeping static pages hot.
+const FOREGROUND_RETRY_DELAYS = [100, 250, 650] as const;
 
 function isWxApi(value: GameRuntimeOptions | WxGameApi): value is WxGameApi {
   return typeof (value as WxGameApi).createCanvas === 'function';
@@ -259,6 +262,10 @@ export class GameRuntime {
   private frameHandle: unknown = null;
   private lastFrameTimestamp: number | undefined;
   private scheduleToken = 0;
+  private frameProgress = 0;
+  private foregroundRedrawFrames = 0;
+  private foregroundRecoveryToken = 0;
+  private foregroundRetryTimer?: ReturnType<typeof setTimeout>;
   private resultRecorded = false;
   private readonly rewards: RewardService;
   private readonly rewardedAd: WxRewardedAdAdapter;
@@ -294,15 +301,32 @@ export class GameRuntime {
     if (token !== this.scheduleToken) return;
     this.frameHandle = null;
     if (!this.runningValue || this.lifecyclePaused || this.disposed) return;
-    const current = Number.isFinite(timestamp) ? timestamp : this.now();
-    if (this.lastFrameTimestamp === undefined) {
-      this.lastFrameTimestamp = current;
-    } else {
-      const delta = Math.max(0, (current - this.lastFrameTimestamp) / 1000);
-      this.lastFrameTimestamp = current;
-      this.tick(delta);
+    this.frameProgress += 1;
+    try {
+      const recovering = this.foregroundRedrawFrames > 0;
+      if (recovering) {
+        this.foregroundRedrawFrames -= 1;
+        this.prepareForegroundSurface();
+      }
+      const current = Number.isFinite(timestamp) ? timestamp : this.now();
+      if (this.lastFrameTimestamp === undefined) {
+        // The first foreground frame must present pixels even on paused/result
+        // screens, but must never advance the simulation by time spent hidden.
+        this.lastFrameTimestamp = current;
+        if (recovering) this.render(false);
+      } else {
+        const delta = Math.max(0, (current - this.lastFrameTimestamp) / 1000);
+        this.lastFrameTimestamp = current;
+        this.tick(delta);
+      }
+    } catch (error) {
+      this.renderDirty = true;
+      this.lastFrameTimestamp = undefined;
+      this.diagnostics.capture('error', error);
+    } finally {
+      // A transient host Canvas error must not kill the only frame callback.
+      this.scheduleFrame();
     }
-    this.scheduleFrame();
   }
 
   constructor(options: GameRuntimeOptions);
@@ -517,6 +541,7 @@ export class GameRuntime {
   stop(): boolean {
     if (!this.runningValue) return false;
     this.runningValue = false;
+    this.cancelForegroundRecovery();
     this.cancelFrame();
     this.input.detach();
     this.lifecycle.detach();
@@ -1129,37 +1154,84 @@ export class GameRuntime {
     this.queuedItem = undefined;
     this.input.reset();
     this.lifecyclePaused = true;
+    this.cancelForegroundRecovery();
     this.cancelFrame();
     this.renderDirty = true;
     this.syncLoopPause();
   }
 
   private handleLifecycleResume(): void {
+    if (this.disposed) return;
     this.lifecyclePaused = false;
-    this.lastFrameTimestamp = undefined;
-    if (!this.storageWritable) this.persistProgress();
-    // Sharing can reset the backing canvas to its default surface/size while
-    // the game is hidden. Reapply DPR and safe-area sizing before drawing.
-    this.resize(true, false);
-    const requestId = this.share.onShow();
-    if (requestId && this.rewardRequest?.id === requestId) this.claimShare();
+    // onShow may arrive alone while the host has silently dropped a pending rAF.
+    // Retire that handle and token even when no onHide was received.
+    this.cancelFrame();
+    this.cancelForegroundRecovery();
+    this.input.reset();
     this.syncLoopPause();
-    if (this.runningValue) {
-      this.render();
+    if (!this.runningValue) return;
+    this.foregroundRedrawFrames = 3;
+    this.scheduleForegroundRetry(0);
+    this.renderDirty = true;
+    try {
+      this.resize(true, false);
+    } catch (error) {
+      // Canvas may still be unavailable here; sharing and reward persistence
+      // must complete independently of surface restoration.
+      this.diagnostics.capture('error', error);
+    }
+    try {
+      if (!this.storageWritable) this.persistProgress();
+      const requestId = this.share.onShow();
+      if (requestId && this.rewardRequest?.id === requestId) this.claimShare();
+      this.syncLoopPause();
+      this.render(false);
+    } catch (error) {
+      this.renderDirty = true;
+      this.diagnostics.capture('error', error);
+    } finally {
       this.scheduleFrame();
     }
   }
 
   private handleLifecycleShow(): void {
-    this.lastFrameTimestamp = undefined;
+    this.handleLifecycleResume();
+  }
+
+  private prepareForegroundSurface(): void {
     this.resize(true, false);
-    const requestId = this.share.onShow();
-    if (requestId && this.rewardRequest?.id === requestId) this.claimShare();
-    this.syncLoopPause();
-    if (this.runningValue) {
-      this.render();
-      this.scheduleFrame();
-    }
+    this.renderer.restoreSurface();
+    this.renderDirty = true;
+  }
+
+  private cancelForegroundRecovery(): void {
+    this.foregroundRecoveryToken += 1;
+    if (this.foregroundRetryTimer !== undefined) clearTimeout(this.foregroundRetryTimer);
+    this.foregroundRetryTimer = undefined;
+    this.foregroundRedrawFrames = 0;
+  }
+
+  private scheduleForegroundRetry(attempt: number): void {
+    if (attempt >= FOREGROUND_RETRY_DELAYS.length || !this.runningValue || this.lifecyclePaused || this.disposed) return;
+    const token = this.foregroundRecoveryToken;
+    const progress = this.frameProgress;
+    this.foregroundRetryTimer = setTimeout(() => {
+      if (token !== this.foregroundRecoveryToken || !this.runningValue || this.lifecyclePaused || this.disposed) return;
+      this.foregroundRetryTimer = undefined;
+      // A timer can still run while native rAF is stalled. Draw directly, then
+      // replace only a stalled rAF so active gameplay keeps its time baseline.
+      if (this.frameProgress === progress) this.cancelFrame();
+      try {
+        this.prepareForegroundSurface();
+        this.render(false);
+      } catch (error) {
+        this.renderDirty = true;
+        this.diagnostics.capture('error', error);
+      } finally {
+        this.scheduleForegroundRetry(attempt + 1);
+        this.scheduleFrame();
+      }
+    }, FOREGROUND_RETRY_DELAYS[attempt]);
   }
 
   private syncExternalLifecycleState(): void {
@@ -1178,9 +1250,11 @@ export class GameRuntime {
     try {
       const token = this.scheduleToken;
       this.frameHandle = this.scheduler.request((timestamp) => this.handleFrame(timestamp, token)) ?? null;
-    } catch {
+    } catch (error) {
       // 调度器不可用时仍保留手动 tick 能力，并停止重试造成的异常循环。
-      this.runningValue = false;
+      // 前台恢复窗口内保留定时重试，避免一次原生 rAF 异常直接停机。
+      this.diagnostics.capture('error', error);
+      if (this.foregroundRetryTimer === undefined) this.runningValue = false;
     }
   }
 

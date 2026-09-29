@@ -175,6 +175,17 @@ export class GameRenderer {
     this.context.resize(viewport);
   }
 
+  /** 前台恢复可能丢失画布内容但保留尺寸；重新建立屏幕 surface，并重画派生缓存。 */
+  restoreSurface(): void {
+    this.background.invalidate();
+    this.appearanceSprites.clear();
+    if (!this.canvas) return;
+    const { viewport } = this.context.layout;
+    this.canvas.width = Math.max(1, Math.round(viewport.width * viewport.dpr));
+    this.canvas.height = Math.max(1, Math.round(viewport.height * viewport.dpr));
+    configureCanvas(this.canvas, this.context.ctx, viewport);
+  }
+
   render(state: GameState | null, level: LevelConfig, options: RenderOptions = {}): void {
     this.renderScene(state, level, options);
     if (options.itemUi) renderItemUi(this.context, options.screen ?? 'game', state, options.itemUi, options.paused);
