@@ -14,7 +14,7 @@
     "build:all": "npm run build:core && npm run build:wxgame",
     "test": "npm run test:core && npm run test:render && npm run test:platform && npm run test:m5 && npm run test:m7 && npm run test:items && npm run test:entry",
     "test:items": "node --experimental-strip-types --test tests/items.test.mjs tests/rewards.test.mjs tests/item-runtime.test.mjs",
-    "test:core": "node --experimental-strip-types --test tests/core.test.mjs",
+    "test:core": "node --experimental-strip-types --test tests/core.test.mjs tests/endless.test.mjs",
     "test:render": "node --experimental-strip-types --test tests/render.test.mjs tests/appearance.test.mjs",
     "test:platform": "node --experimental-strip-types --test tests/platform.test.mjs",
     "test:m5": "node --experimental-strip-types --test tests/m5.test.mjs",
@@ -22,6 +22,7 @@
     "test:entry": "node --experimental-strip-types --test tests/entry.test.mjs tests/startup.test.mjs tests/runtime-performance.test.mjs",
     "bench:simulation": "node --experimental-strip-types scripts/benchmark-simulation.mjs",
     "evaluate:difficulty": "node --experimental-strip-types scripts/evaluate-difficulty.mjs",
+    "evaluate:endless": "node --experimental-strip-types scripts/evaluate-endless.mjs",
     "check:release": "node scripts/check-release.mjs",
     "check:release:strict": "node scripts/check-release.mjs --strict",
     "check": "npm run build:core && npm run check:assets && npm run build:wxgame && npm test && npm run check:release"

@@ -1,4 +1,4 @@
-import type { DoorConfig, LevelConfig } from './types.ts';
+import type { DoorConfig, LevelConfig, LevelEventConfig } from './types.ts';
 
 const platform = () => ({ x: 0, y: 0, width: 320, height: 568 });
 // 车厢底边仍与站台门线重合；增加上方高度，让横屏车厢内部有足够容纳角色的空间。
@@ -510,45 +510,67 @@ export const CAMPAIGN_LEVELS: readonly LevelConfig[] = CAMPAIGN_LEVEL_BASE.map(a
 
 export function createEndlessLevel(wave = 1): LevelConfig {
   const safeWave = Math.max(1, Math.floor(Number.isFinite(wave) ? wave : 1));
-  const source = CAMPAIGN_LEVELS[(safeWave - 1) % CAMPAIGN_LEVELS.length] ?? CAMPAIGN_LEVELS[0];
-  // 前 10 轮建立主要难度曲线；之后放缓增长，让高难度保持可玩而不是快速撞上封顶。
-  const pressure = Math.min(2.05, 1 + Math.min(safeWave - 1, 9) * 0.075 + Math.max(0, safeWave - 10) * 0.025);
-  const speedPressure = Math.min(1.42, 1 + Math.min(safeWave - 1, 9) * 0.027 + Math.max(0, safeWave - 10) * 0.012);
-  const events = (source.events ?? []).map((event) => ({
-    ...event,
-    id: `endless-${safeWave}-${event.id}`,
-    speedMultiplier: event.speedMultiplier === undefined
-      ? undefined
-      : Math.min(1.9, event.speedMultiplier * speedPressure),
-  }));
-  return attachObjectives({
-    ...source,
+  // 只轮换车厢配色。人数、门宽和事件使用独立曲线，避免战役模板的难度
+  // 再乘一次倍率，或第 13 轮突然回到第一站的人数和单门布局。
+  const theme = CAMPAIGN_LEVELS[(safeWave - 1) % CAMPAIGN_LEVELS.length]?.carriageTheme;
+  const pressure = Math.min(safeWave - 1, 19) + Math.max(0, safeWave - 20) * 0.4;
+  const dualDoor = safeWave >= 7;
+  // 双门增加承载量；同步提高总人数，但避免把单门的两股客流挤在同一门洞。
+  const count = Math.min(180, Math.round(dualDoor ? 100 + (pressure - 6) * 2.5 : 44 + pressure * 4));
+  const width = dualDoor ? Math.max(58, 74 - (pressure - 6) * 0.5) : 80 - pressure * 1.2;
+  const events: LevelEventConfig[] = [];
+  if (safeWave >= 5) {
+    events.push({
+      id: `endless-${safeWave}-surge`, kind: 'crowd-surge', at: 4.5, duration: 1.8,
+      label: '早高峰客流', description: '人流短暂加快，留意门边空隙。',
+      speedMultiplier: Math.min(1.2, 1.08 + pressure * 0.005),
+    });
+  }
+  if (safeWave >= 14) {
+    events.push({
+      id: `endless-${safeWave}-close`, kind: 'door-close',
+      // 首次提前关门发生得较晚；之后逐轮提前，始终给出完整的四秒预警。
+      at: Math.max(7.8, 8.8 - (safeWave - 14) / 6), duration: 1.5, warningDuration: 4,
+      label: '车门即将关闭', description: '一侧车门即将关闭，提前转向另一扇门。',
+      fromDoorId: 'b', toDoorId: 'a',
+    });
+  }
+  return {
     id: ENDLESS_LEVEL_ID,
     name: '无尽早高峰',
     stationName: `无尽早高峰 · 第 ${safeWave} 轮`,
     description: `第 ${safeWave} 轮：客流压力持续上升，坚持到下一站。`,
+    carriageTheme: theme,
+    phaseDurations: { intro: 0.8, arriving: 1.1, positioning: 0.8, exiting: 2.5 },
+    boardingDuration: 12,
+    warningThreshold: 2,
+    platformBounds: platform(),
+    trainBounds: train(),
+    doors: dualDoor ? [door('a', 'A 门', 92, width), door('b', 'B 门', 228, width, true)]
+      : [door('a', 'A 门', 160, width, true)],
+    recommendedDoorId: dualDoor ? 'b' : 'a',
     passenger: {
-      ...source.passenger,
-      count: Math.min(260, Math.round(source.passenger.count * pressure)),
-      alightingCount: Math.min(
-        Math.round(source.passenger.count * pressure),
-        Math.round(source.passenger.alightingCount * pressure),
-      ),
-      baseSpeed: source.passenger.baseSpeed * speedPressure,
+      count,
+      alightingCount: Math.round(count * 0.3),
+      baseSpeed: Math.min(48, 34 + pressure * 0.4),
+      spawnPadding: 22,
+      exitMargin: 36,
       kindWeights: {
-        ...source.passenger.kindWeights,
-        fast: (source.passenger.kindWeights.fast ?? 0) + Math.min(8, (safeWave - 1) * 0.25),
-        group: (source.passenger.kindWeights.group ?? 0) + Math.min(6, (safeWave - 1) * 0.18),
+        regular: 8, slow: 1, fast: 1 + Math.min(3, pressure * 0.1),
+        luggage: 1.5, phone: 1, group: 1 + Math.min(2, pressure * 0.05),
       },
     },
-    // 保持每轮的倒计时长度，通过客流和事件压力递增提升难度。
+    player: { spawn: { x: 160, y: 505 }, radius: 12, speed: 120, maxStamina: 100, staminaRegen: 5.5 },
+    // 容量容纳本轮候车客，避免满员后原地排队的人群永久堵住门口。
+    carriageCapacity: Math.ceil(count * 0.75),
+    guide: { ...baseGuide, cost: 18, range: 94, maxTargets: 2 },
     events,
     objectives: [
       { id: 'alighting-rate', label: '保证 70% 下车乘客顺利离开', minRatio: 0.7 },
       { id: 'finish-time', label: '提前 1 秒进入车厢', minRemaining: 1 },
       { id: 'courtesy-score', label: '礼让值达到 60', minScore: 60 },
     ],
-  });
+  };
 }
 
 export const LEVELS_BY_ID: Readonly<Record<string, LevelConfig>> = Object.fromEntries(
