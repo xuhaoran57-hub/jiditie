@@ -11,6 +11,7 @@ export interface ItemUiState {
   status: RewardStatus;
   inventory: Record<ItemId, number>;
   used: Record<ItemId, number>;
+  runUsed: Record<ItemId, number>;
   claimedResultRewards: ItemId[];
   message: string;
   adAvailable: boolean;
@@ -153,8 +154,10 @@ export function renderItemUi(context: RenderContext, screen: string, state: Game
         button(context, l.entry, `补给  喇叭 ${ui.inventory['commute-horn']} · 车票 ${ui.inventory['delay-ticket']}`);
       }
       if (screen === 'result') {
-        const used = ITEM_IDS.filter((id) => ui.used[id] > 0);
-        const usage = used.length ? `已使用：${used.map((id) => ITEMS[id].shortName).join('、')}` : (state?.outcome === 'success' ? '无道具通关' : '本局未使用道具');
+        const used = ITEM_IDS.filter((id) => (ui.endless ? ui.runUsed : ui.used)[id] > 0);
+        const usage = used.length
+          ? `${ui.endless ? '本次挑战已使用' : '已使用'}：${used.map((id) => ITEMS[id].shortName).join('、')}`
+          : (state?.outcome === 'success' ? '无道具通关' : ui.endless ? '本次挑战未使用道具' : '本局未使用道具');
         const noteRect = failed
           ? { x: actions.panel.x + 12, y: actions.panel.y + actions.panel.height - 23, width: actions.panel.width - 24, height: 18 }
           : { x: c.x + 12, y: c.y + 58, width: c.width - 24, height: 18 };
@@ -213,7 +216,8 @@ export function renderItemUi(context: RenderContext, screen: string, state: Game
     const descriptionY = l.cards[0].rect.y + l.cards[0].rect.height + 5;
     label(context, ui.message || ITEMS[ui.selected].description, { x: p.x + 12, y: descriptionY, width: p.width - 24, height: 25 }, 12, '#ffd36a');
     if (p.height >= 330) {
-      const hint = ui.panel === 'welcome' ? '进入关卡后点击道具使用' : '分享返回后可领取 1 件道具';
+      const hint = ui.panel === 'welcome' ? '进入关卡后点击道具使用'
+        : ui.endless ? '每轮每种道具限用 1 次，进入下一轮重置次数' : '分享返回后可领取 1 件道具';
       label(context, hint, { x: p.x + 12, y: descriptionY + 26, width: p.width - 24, height: 20 }, 11, '#b5cad8', 400);
     }
     if (ui.panel === 'welcome') button(context, l.single, ui.welcomePending ? '领取道具' : '知道了');

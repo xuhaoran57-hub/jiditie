@@ -282,6 +282,8 @@ export class GameRuntime {
   private itemMessage = '';
   private messageUntil = 0;
   private usedItems = emptyItemCounts();
+  // 每轮额度与整场使用记录分开，切换无尽轮次不能恢复无道具成绩资格。
+  private runUsedItems = emptyItemCounts();
   private queuedItem?: ItemId;
   private runId = '';
   private requestSequence = 0;
@@ -914,6 +916,7 @@ export class GameRuntime {
     if (!this.closeItemPanel()) return false;
     this.queuedItem = undefined;
     this.usedItems = emptyItemCounts();
+    this.runUsedItems = emptyItemCounts();
     this.runId = this.newRequestId();
     const safe = safeIndex(index, this.levels.length);
     const level = this.levels[safe];
@@ -1070,6 +1073,7 @@ export class GameRuntime {
 
   private startEndlessWave(): void {
     this.queuedItem = undefined;
+    this.usedItems = emptyItemCounts();
     const level = this.currentLevel;
     this.currentSeed = this.seedForLevel(level.id);
     this.simulation = new GameSimulation(level, this.currentSeed);
@@ -1094,7 +1098,7 @@ export class GameRuntime {
     if (this.endlessActive && level.id === ENDLESS_LEVEL_ID) {
       const completedWave = state.outcome === 'success' ? this.endlessWave : Math.max(0, this.endlessWave - 1);
       let next = updateEndlessRecord(this.saveValue, completedWave, state.score?.total ?? 0);
-      if (!ITEM_IDS.some((id) => this.usedItems[id] > 0)) {
+      if (!ITEM_IDS.some((id) => this.runUsedItems[id] > 0)) {
         next.unassisted.endlessBestWave = Math.max(next.unassisted.endlessBestWave, completedWave);
         next.unassisted.endlessBestScore = Math.max(next.unassisted.endlessBestScore, state.score?.total ?? 0);
       }
@@ -1425,6 +1429,7 @@ export class GameRuntime {
     return {
       panel: this.itemPanel, selected: this.selectedItem, status: this.rewardStatus,
       inventory: { ...this.saveValue.items.inventory }, used: { ...this.usedItems },
+      runUsed: { ...this.runUsedItems },
       claimedResultRewards: [...this.claimedResultRewards],
       message: this.visibleItemMessage(),
       adAvailable: this.rewardedAd.available, shareAvailable: this.share.available,
@@ -1552,7 +1557,7 @@ export class GameRuntime {
     // 空库存直接领取，不受使用阶段或本局次数限制；调起外部界面前暂停并清空待使用操作。
     if (this.saveValue.items.inventory[id] <= 0) { this.openQuickReward(id); return false; }
     if (this.queuedItem) return false;
-    if (this.usedItems[id] >= 1) { this.notice(this.currentLevel.id === ENDLESS_LEVEL_ID ? '本场已经使用过该道具' : '本局已经使用过该道具'); return false; }
+    if (this.usedItems[id] >= 1) { this.notice(this.currentLevel.id === ENDLESS_LEVEL_ID ? '本轮已经使用过该道具' : '本局已经使用过该道具'); return false; }
     if (!itemPhaseAllowed(state, id)) { this.notice(ITEMS[id].hint); return false; }
     this.queuedItem = id;
     return true;
@@ -1576,6 +1581,7 @@ export class GameRuntime {
     if (!used) { this.rewards.recoverUse(); return false; }
     this.pendingUseApplied = true;
     this.usedItems[id] += 1;
+    this.runUsedItems[id] += 1;
     if (this.rewards.finishUse(requestId)) this.pendingUseApplied = false;
     this.notice(`${ITEMS[id].name}已使用`);
     return true;

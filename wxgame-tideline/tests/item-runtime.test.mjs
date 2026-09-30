@@ -16,6 +16,20 @@ function finishLevel(runtime, success = false) {
   assert.equal(runtime.screen, 'result');
 }
 
+function reachBoarding(runtime) {
+  for (let i = 0; i < 500 && runtime.state.phase !== 'boarding'; i++) runtime.tick(1 / 30);
+  assert.equal(runtime.state.phase, 'boarding');
+}
+
+// 构造结算状态，专门验证跨轮额度、库存和成绩；通关能力由 endless.test.mjs 回放覆盖。
+function settleRound(runtime, success = true, total = 90) {
+  const state = runtime.state;
+  state.phase = 'result'; state.outcome = success ? 'success' : 'failure';
+  state.score = { total, stars: success ? 3 : 0, success, medal: success ? 'gold' : 'none', efficiency: total, courtesy: total, stamina: total };
+  runtime.tick(0);
+  assert.equal(runtime.screen, 'result');
+}
+
 function assertResultRewardButtons(h, expected) {
   h.runtime.tick(0);
   const areas = itemHitAreas(h.runtime.renderer.context.layout, h.runtime.screen, h.runtime.state, h.runtime.getItemUi());
@@ -396,16 +410,89 @@ test('失败页领取后剩余按钮逐行居中，绘制和点击位置随布�
   }
 });
 
-test('无尽轮次不重置道具额度或无道具标记，重开整场才重置', () => {
+test('无尽每轮每种道具各可使用一次，切轮重置额度并继续扣库存', () => {
+  const save = emptySave(); save.endlessUnlocked = true;
+  save.items.inventory = { 'commute-horn': 3, 'delay-ticket': 3 };
+  const h = createHarness({ save }); h.runtime.startLevel('endless'); h.runtime.confirmStart();
+  for (let wave = 1; wave <= 2; wave++) {
+    assert.deepEqual(h.runtime.getItemUi().used, { 'commute-horn': 0, 'delay-ticket': 0 });
+    assert.deepEqual(h.runtime.state.itemUses, { 'commute-horn': 0, 'delay-ticket': 0 });
+    reachBoarding(h.runtime);
+    const state = h.runtime.state;
+    const passenger = state.passengers.find((p) => p.role === 'waiting');
+    assert.ok(passenger);
+    passenger.position = { x: state.player.position.x, y: state.player.position.y - 40 };
+    state.player.facing = { x: 0, y: -1 };
+    for (const id of ['commute-horn', 'delay-ticket']) {
+      const before = state.doorRemaining;
+      h.tap(`use:${id}`);
+      assert.equal(h.runtime.getItemUi().used[id], 1);
+      assert.equal(state.itemUses[id], 1);
+      assert.equal(h.runtime.getItemUi().runUsed[id], wave);
+      assert.equal(h.runtime.saveData.items.inventory[id], 3 - wave);
+      if (id === 'delay-ticket') assert.ok(Math.abs(state.doorRemaining - before - 3 + 1 / 60) < 1e-6);
+      else assert.ok(state.passengers.some((p) => p.guidedUntil > state.elapsed));
+      assert.equal(h.runtime.queueItem(id), false);
+      assert.equal(h.runtime.getItemUi().message, '本轮已经使用过该道具');
+      assert.equal(h.runtime.saveData.items.inventory[id], 3 - wave);
+    }
+    settleRound(h.runtime);
+    assert.equal(h.runtime.saveData.unassisted.endlessBestWave, 0);
+    assert.equal(h.runtime.nextLevel(), true);
+  }
+  assert.deepEqual(h.runtime.getItemUi().used, { 'commute-horn': 0, 'delay-ticket': 0 });
+  assert.deepEqual(h.runtime.saveData.items.inventory, { 'commute-horn': 1, 'delay-ticket': 1 });
+  settleRound(h.runtime);
+  assert.equal(h.runtime.saveData.endlessBestWave, 3);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestWave, 0);
+  assert.ok(h.context.frameOperations.some(([text]) => text === '本次挑战已使用：喇叭、车票'));
+  assert.ok(!h.context.frameOperations.some(([text]) => text === '无道具通关'));
+  h.runtime.destroy();
+});
+
+test('无尽用道具后的成功和失败轮次保留整场标记，重开后可重新记录无道具成绩', () => {
   const save = emptySave(); save.endlessUnlocked = true; save.items.inventory['delay-ticket'] = 3;
   const h = createHarness({ save }); h.runtime.startLevel('endless'); h.runtime.confirmStart();
-  for (let i = 0; i < 500 && h.runtime.state.phase !== 'boarding'; i++) h.runtime.tick(1 / 30);
-  h.runtime.queueItem('delay-ticket'); h.runtime.tick(1 / 60);
-  const state = h.runtime.state; state.phase = 'result'; state.outcome = 'success'; state.score = { total: 90, stars: 3, success: true, medal: 'gold', efficiency: 90, courtesy: 90, stamina: 90 };
-  h.runtime.tick(0); assert.equal(h.runtime.saveData.unassisted.endlessBestWave, 0);
-  assert.equal(h.runtime.nextLevel(), true); assert.equal(h.runtime.getItemUi().used['delay-ticket'], 1);
-  assert.equal(h.runtime.queueItem('delay-ticket'), false); h.runtime.retry();
-  assert.equal(h.runtime.getItemUi().used['delay-ticket'], 0); assert.equal(h.runtime.saveData.items.inventory['delay-ticket'], 2); h.runtime.destroy();
+  settleRound(h.runtime, true, 70);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestWave, 1);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestScore, 70);
+  assert.equal(h.runtime.nextLevel(), true); reachBoarding(h.runtime);
+  h.tap('use:delay-ticket'); settleRound(h.runtime);
+  assert.equal(h.runtime.nextLevel(), true); settleRound(h.runtime, true, 94);
+  assert.equal(h.runtime.nextLevel(), true); settleRound(h.runtime, false, 92);
+  assert.equal(h.runtime.saveData.endlessBestWave, 3);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestWave, 1);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestScore, 70);
+  assert.equal(h.runtime.getItemUi().used['delay-ticket'], 0);
+  assert.equal(h.runtime.getItemUi().runUsed['delay-ticket'], 1);
+  assert.ok(h.context.frameOperations.some(([text]) => text.startsWith('本次挑战已使用：车票')));
+  assert.equal(h.runtime.retry(), true);
+  assert.deepEqual(h.runtime.getItemUi().runUsed, { 'commute-horn': 0, 'delay-ticket': 0 });
+  assert.deepEqual(h.runtime.getItemUi().used, { 'commute-horn': 0, 'delay-ticket': 0 });
+  assert.equal(h.runtime.saveData.items.inventory['delay-ticket'], 2);
+  settleRound(h.runtime, true, 95);
+  assert.equal(h.runtime.nextLevel(), true); settleRound(h.runtime, true, 96);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestWave, 2);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestScore, 96);
+  assert.ok(h.context.frameOperations.some(([text]) => text === '无道具通关'));
+  h.runtime.destroy();
+});
+
+test('无尽道具无目标或扣库存保存失败不占本轮额度，也不影响无道具成绩', () => {
+  const save = emptySave(); save.endlessUnlocked = true;
+  save.items.inventory = { 'commute-horn': 1, 'delay-ticket': 1 };
+  const h = createHarness({ save }); h.runtime.startLevel('endless'); h.runtime.confirmStart(); reachBoarding(h.runtime);
+  h.runtime.state.passengers = [];
+  h.tap('use:commute-horn');
+  assert.equal(h.runtime.getItemUi().message, '前方没有可疏导的乘客，未消耗道具');
+  h.failWrites(true); h.tap('use:delay-ticket'); h.failWrites(false);
+  assert.deepEqual(h.runtime.saveData.items.inventory, { 'commute-horn': 1, 'delay-ticket': 1 });
+  assert.deepEqual(h.runtime.getItemUi().used, { 'commute-horn': 0, 'delay-ticket': 0 });
+  assert.deepEqual(h.runtime.getItemUi().runUsed, { 'commute-horn': 0, 'delay-ticket': 0 });
+  settleRound(h.runtime);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestWave, 1);
+  assert.equal(h.runtime.saveData.unassisted.endlessBestScore, 90);
+  h.runtime.destroy();
 });
 test('使用过道具仍可通关解锁，但不写无道具纪录', () => {
   const h = createHarness(); startBoarding(h.runtime); h.runtime.queueItem('delay-ticket'); h.runtime.tick(1 / 60);
